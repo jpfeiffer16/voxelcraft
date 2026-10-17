@@ -215,3 +215,4 @@
 })();
 // sync with the state main.js may already be in (e.g. ?test=1 auto-start)
 if (window.game && window.game.onState) window.game.onState(window.game.state);
+{ const s = document.querySelector('#inventory .sub'); if (s && window.game && window.game.isMobile) s.textContent = 'Tap a block, torch or spawn egg to put it in the selected hotbar slot.'; }

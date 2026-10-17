@@ -6,6 +6,7 @@ window.VC = window.VC || {};
   const B = VC.B;
   const hash3 = VC.Noise.hash3;
   const idx = (x, y, z) => x + z * CS + y * CS * CS;
+  const LIGHT = VC.Blocks.LIGHT;
 
   class Chunk {
     constructor(cx, cz) {
@@ -14,6 +15,9 @@ window.VC = window.VC || {};
       this.maxY = 0;           // highest non-air y + 1
       this.meshes = null;      // { opaque, cutout, water }
       this.dirty = true;
+      this.urgent = false;     // edited: rebuild this frame
+      this.emitters = new Set(); // indices of light-emitting blocks
+      this.blockLight = null;  // Uint8Array of baked block light (only when lit)
     }
   }
 
@@ -164,7 +168,7 @@ window.VC = window.VC || {};
       c = new Chunk(cx, cz);
       this.gen.generate(c);
       const e = this.edits.get(k);
-      if (e) for (const [i, id] of e) { c.data[i] = id; const y = Math.floor(i / 256); if (y + 2 > c.maxY) c.maxY = Math.min(CH, y + 2); }
+      if (e) for (const [i, id] of e) { c.data[i] = id; const y = Math.floor(i / 256); if (y + 2 > c.maxY) c.maxY = Math.min(CH, y + 2); if (LIGHT[id]) c.emitters.add(i); }
       this.chunks.set(k, c);
       return c;
     }
@@ -176,20 +180,34 @@ window.VC = window.VC || {};
       if (!c) return -1; // unloaded
       return c.data[idx(x - cx * CS, y, z - cz * CS)];
     }
+    getBlockLight(x, y, z) {
+      if (y < 0 || y >= CH) return 0;
+      const cx = Math.floor(x / CS), cz = Math.floor(z / CS);
+      const c = this.chunks.get(cx + ',' + cz);
+      if (!c || !c.blockLight) return 0;
+      return c.blockLight[idx(x - cx * CS, y, z - cz * CS)];
+    }
     setBlock(x, y, z, id) {
       if (y < 0 || y >= CH) return false;
       const cx = Math.floor(x / CS), cz = Math.floor(z / CS);
       const c = this.chunks.get(cx + ',' + cz);
       if (!c) return false;
       const lx = x - cx * CS, lz = z - cz * CS, i = idx(lx, y, lz);
-      c.data[i] = id; c.dirty = true;
+      const old = c.data[i];
+      c.data[i] = id; c.dirty = true; c.urgent = true;
+      if (LIGHT[id]) c.emitters.add(i); else c.emitters.delete(i);
       if (y + 2 > c.maxY) c.maxY = Math.min(CH, y + 2);
       let e = this.edits.get(c.key); if (!e) { e = new Map(); this.edits.set(c.key, e); }
       e.set(i, id);
       // neighbours need remesh when editing borders (incl. diagonals for AO)
       const nx = lx === 0 ? -1 : lx === CS - 1 ? 1 : 0, nz = lz === 0 ? -1 : lz === CS - 1 ? 1 : 0;
-      const mark = (a, b) => { const n = this.chunks.get((cx + a) + ',' + (cz + b)); if (n) n.dirty = true; };
+      const mark = (a, b) => { const n = this.chunks.get((cx + a) + ',' + (cz + b)); if (n) { n.dirty = true; n.urgent = true; } };
       if (nx) mark(nx, 0); if (nz) mark(0, nz); if (nx && nz) mark(nx, nz);
+      // Block light can reach up to 14 blocks: if a light source changed, or lights are nearby,
+      // neighbouring chunks need relighting too (rebuilt over the next frames, not urgently).
+      let lit = LIGHT[id] || LIGHT[old];
+      if (!lit) for (let a = -1; a <= 1 && !lit; a++) for (let b = -1; b <= 1; b++) { const n = this.chunks.get((cx + a) + ',' + (cz + b)); if (n && n.emitters.size) { lit = true; break; } }
+      if (lit) for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const n = this.chunks.get((cx + a) + ',' + (cz + b)); if (n) n.dirty = true; }
       if (this.onEdit) this.onEdit(c);
       return true;
     }

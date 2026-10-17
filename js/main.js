@@ -11,7 +11,7 @@
   window.addEventListener('error', (e) => { const el = $('error'); el.classList.remove('hidden'); el.textContent += (e.message || e) + '\n'; });
 
   // ---------- settings ----------
-  const settings = Object.assign({ renderDistance: MOBILE ? 4 : 8, sensitivity: 8, fov: MOBILE ? 70 : 75, showDebug: !MOBILE, tilt: true, tiltSens: 10, lookSens: 10 }, safeParse(localStorage.getItem(SETTINGS_KEY)) || {});
+  const settings = Object.assign({ renderDistance: MOBILE ? 4 : 8, sensitivity: 8, fov: MOBILE ? 70 : 75, showDebug: !MOBILE, tilt: true, tiltSens: 10, lookSens: 10, sound: true }, safeParse(localStorage.getItem(SETTINGS_KEY)) || {});
   function safeParse(s) { try { return s ? JSON.parse(s) : null; } catch (e) { return null; } }
   function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {} }
 
@@ -36,6 +36,18 @@
   const matCutout = new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, alphaTest: 0.5, side: THREE.DoubleSide });
   const matWater = new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, transparent: true, opacity: 0.72, depthWrite: false, side: THREE.DoubleSide });
   const terrainMats = [matOpaque, matCutout, matWater];
+  // Vertex colour r = sky light (scaled by daylight), g = block light (torches; warm, flickering)
+  const lightUniforms = { uDay: { value: 1 }, uTime: { value: 0 } };
+  for (const m of terrainMats) {
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.uDay = lightUniforms.uDay; sh.uniforms.uTime = lightUniforms.uTime;
+      sh.vertexShader = 'varying float vFlick;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vFlick = position.x * 1.7 + position.z * 2.3 + position.y * 0.9;');
+      sh.fragmentShader = 'uniform float uDay;\nuniform float uTime;\nvarying float vFlick;\n' + sh.fragmentShader.replace('#include <color_fragment>',
+        '  float flick = 0.9 + 0.06 * sin(uTime * 10.0 + vFlick) + 0.04 * sin(uTime * 23.0 + vFlick * 1.7);\n' +
+        '  vec3 lightC = max(vec3(vColor.r * uDay), vColor.g * flick * vec3(1.0, 0.86, 0.66));\n' +
+        '  diffuseColor.rgb *= lightC;');
+    };
+  }
 
   // ---------- sky: sun, moon, stars, clouds ----------
   function discTexture(draw) { const c = document.createElement('canvas'); c.width = c.height = 64; draw(c.getContext('2d')); const t = new THREE.CanvasTexture(c); t.magFilter = THREE.NearestFilter; return t; }
@@ -69,7 +81,8 @@
   let world = null, player = null;
   let state = 'title'; // title | playing | paused | inventory
   let worldTime = 0.05;
-  let hotbar = [B.GRASS, B.DIRT, B.STONE, B.COBBLE, B.PLANKS, B.LOG, B.GLASS, B.BRICK, B.GLOWSTONE];
+  let hotbar = [B.GRASS, B.DIRT, B.STONE, B.COBBLE, B.PLANKS, B.LOG, B.TORCH, B.DOG_EGG, B.CAT_EGG];
+  let mobs = null;
   let selected = 0;
   let saveTimer = 0, dirtySave = false;
   const testMode = /[?&]test=1/.test(location.search);
@@ -104,13 +117,18 @@
   }
   function createWorld(seed, save) {
     disposeWorld();
+    pendingMobs = null;
     world = new VC.World(seed);
+    if (mobs) mobs.dispose();
+    mobs = new VC.Mobs(scene, world, { max: MOBILE ? 10 : 20, maxWild: MOBILE ? 4 : 6 });
+    mobs.sound = settings.sound;
     world.onEdit = () => { dirtySave = true; };
     player = new VC.Player(world, camera);
     if (save) {
       world.loadEdits(save);
       if (save.player) { player.pos.set(save.player.x, save.player.y, save.player.z); player.yaw = save.player.yaw || 0; player.pitch = save.player.pitch || 0; player.flying = !!save.player.flying; }
       if (typeof save.time === 'number') worldTime = save.time;
+      if (Array.isArray(save.mobs)) pendingMobs = save.mobs;
       if (Array.isArray(save.hotbar) && save.hotbar.length === 9) hotbar = save.hotbar.map(id => defs[id] && defs[id].placeable ? id : B.STONE);
     } else {
       const [x, y, z] = findSpawn(world.gen);
@@ -124,11 +142,12 @@
     buildHotbar();
     $('world-info').textContent = 'Seed: ' + seed + (save ? ' · ' + world.edits.size + ' edited chunk(s) loaded' : ' · new world');
   }
+  let pendingMobs = null; // restored once their chunks are loaded
   function saveGame() {
     if (!world) return false;
     try {
       const p = player.pos;
-      localStorage.setItem(SAVE_KEY, world.serialize({ time: worldTime, hotbar, player: { x: p.x, y: p.y, z: p.z, yaw: player.yaw, pitch: player.pitch, flying: player.flying } }));
+      localStorage.setItem(SAVE_KEY, world.serialize({ time: worldTime, hotbar, mobs: mobs.serialize().concat(pendingMobs || []), player: { x: p.x, y: p.y, z: p.z, yaw: player.yaw, pitch: player.pitch, flying: player.flying } }));
       dirtySave = false; saveTimer = 0;
       return true;
     } catch (e) { console.warn('Save failed', e); return false; }
@@ -159,7 +178,7 @@
     c.meshes = [];
     const add = (geo, mat, order) => { if (!geo) return; const m = new THREE.Mesh(geo, mat); m.matrixAutoUpdate = false; m.renderOrder = order; scene.add(m); c.meshes.push(m); };
     add(g.opaque, matOpaque, 0); add(g.cutout, matCutout, 0); add(g.water, matWater, 1);
-    c.dirty = false;
+    c.dirty = false; c.urgent = false;
   }
   let stats = { gen: 0, mesh: 0 };
   function updateChunks(budget) {
@@ -168,7 +187,7 @@
     const pcx = Math.floor(player.pos.x / CS), pcz = Math.floor(player.pos.z / CS);
     const t0 = performance.now();
     // 1) edited (dirty) chunks near the player get rebuilt immediately
-    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { const c = world.getChunk(pcx + dx, pcz + dz); if (c && c.dirty && c.meshes && neighboursReady(c.cx, c.cz)) meshChunk(c); }
+    for (const c of world.chunks.values()) if (c.urgent) { c.urgent = false; if (c.dirty && c.meshes && neighboursReady(c.cx, c.cz)) meshChunk(c); }
     // 2) generate + mesh nearest-first within the time budget
     for (const [dx, dz, d] of offsets) {
       if (performance.now() - t0 > budget) break;
@@ -209,8 +228,8 @@
       scene.background.copy(tmpC); scene.fog.color.copy(tmpC);
       scene.fog.near = R * 0.55; scene.fog.far = R * 0.98;
     }
-    const bright = 0.24 + 0.76 * day;
-    for (const m of terrainMats) m.color.setScalar(bright);
+    const bright = 0.15 + 0.85 * day;
+    lightUniforms.uDay.value = bright; currentDaylight = bright;
     clouds.material.color.setScalar(0.2 + 0.8 * day); clouds.material.opacity = 0.12 + 0.68 * day;
     stars.material.opacity = Math.max(0, 1 - day * 1.6);
     const cp = camera.position;
@@ -224,7 +243,7 @@
     cloudTex.offset.set((cp.x + cloudDrift) / CLOUD_SIZE, -cp.z / CLOUD_SIZE);
     $('water-overlay').style.display = player.headInWater ? 'block' : 'none';
   }
-  let cloudDrift = 0;
+  let cloudDrift = 0, currentDaylight = 1;
 
   // ---------- UI: hotbar & inventory ----------
   function iconCanvas(id, size) { const c = document.createElement('canvas'); c.width = c.height = size; VC.Textures.drawIcon(c.getContext('2d'), atlas.canvas, id, size); return c; }
@@ -244,7 +263,8 @@
   function select(i) { selected = (i + 9) % 9; buildHotbar(); toast(defs[hotbar[selected]].name); }
   function buildInventory() {
     const g = $('inv-grid'); g.innerHTML = '';
-    for (const d of defs) {
+    for (const id of VC.Blocks.ORDER) {
+      const d = defs[id];
       if (!d || !d.placeable) continue;
       const it = document.createElement('div'); it.className = 'inv-item'; it.title = d.name;
       it.appendChild(iconCanvas(d.id, 64));
@@ -279,6 +299,7 @@
   });
 
   $('btn-play').addEventListener('click', play);
+  document.addEventListener('pointerdown', () => { if (settings.sound) VC.MobSounds.unlock(); }, { once: true });
   $('btn-new').addEventListener('click', () => {
     const s = $('seed').value;
     const seed = s.trim() ? hashSeed(s) : (Math.random() * 2147483647) | 0;
@@ -290,6 +311,8 @@
   $('btn-save').addEventListener('click', () => { $('save-status').textContent = saveGame() ? 'Saved at ' + new Date().toLocaleTimeString() : 'Save failed (storage full?)'; });
   $('btn-title').addEventListener('click', () => { saveGame(); setState('title'); });
   $('btn-inv-done').addEventListener('click', play);
+  $('btn-inv-close').addEventListener('click', play);
+  { const chk = $('chk-sound'); chk.checked = settings.sound; chk.addEventListener('change', () => { settings.sound = chk.checked; if (mobs) mobs.sound = chk.checked; saveSettings(); if (chk.checked) MobSounds.unlock(); }); }
   { const chk = $('chk-debug'); chk.checked = settings.showDebug; chk.addEventListener('change', () => { settings.showDebug = chk.checked; saveSettings(); }); }
   function bindSlider(id, key, fmt, apply) {
     const el = $(id), val = $(id + '-val');
@@ -343,34 +366,60 @@
   window.addEventListener('beforeunload', () => { if (world && state !== 'title') saveGame(); });
 
   // ---------- block interaction ----------
-  let target = null;
+  let target = null, targetMob = null;
+  const MobSounds = VC.MobSounds;
   function isReplaceable(id) { return id === B.AIR || id === B.WATER || VC.Blocks.RENDER[id] === 4; }
+  const WALL_TORCH = { '1,0': B.TORCH_PX, '-1,0': B.TORCH_NX, '0,1': B.TORCH_PZ, '0,-1': B.TORCH_NZ };
+  function removeUnsupported(x, y, z) {
+    // plants and floor torches above, wall torches attached to the sides
+    const above = world.getBlock(x, y + 1, z);
+    if (VC.Blocks.RENDER[above] === 4 || above === B.TORCH) world.setBlock(x, y + 1, z, B.AIR);
+    for (const [dx, dz, id] of [[1, 0, B.TORCH_PX], [-1, 0, B.TORCH_NX], [0, 1, B.TORCH_PZ], [0, -1, B.TORCH_NZ]])
+      if (world.getBlock(x + dx, y, z + dz) === id) world.setBlock(x + dx, y, z + dz, B.AIR);
+  }
   function breakBlock() {
+    if (targetMob) { const msg = mobs.hit(targetMob); if (msg) toast(msg); targetMob = null; dirtySave = true; return; }
     if (!target || target.id === B.BEDROCK) return;
     world.setBlock(target.x, target.y, target.z, B.AIR);
-    const above = world.getBlock(target.x, target.y + 1, target.z);
-    if (VC.Blocks.RENDER[above] === 4) world.setBlock(target.x, target.y + 1, target.z, B.AIR);
+    removeUnsupported(target.x, target.y, target.z);
     // fill from adjacent water so oceans don't get dry holes
     const adjW = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]].some(([a, b, c]) => world.getBlock(target.x + a, target.y + b, target.z + c) === B.WATER);
     if (adjW) world.setBlock(target.x, target.y, target.z, B.WATER);
     target = null;
   }
   function placeBlock() {
+    if (MobSounds) MobSounds.unlock();
+    if (targetMob) { toast(mobs.interact(targetMob)); dirtySave = true; return; }
     if (!target) return;
-    const id = hotbar[selected];
+    let id = hotbar[selected];
+    const d = defs[id];
     let x = target.x, y = target.y, z = target.z;
-    if (VC.Blocks.RENDER[target.id] !== 4) { x += target.nx; y += target.ny; z += target.nz; }
+    const onPlant = VC.Blocks.RENDER[target.id] === 4;
+    if (!onPlant) { x += target.nx; y += target.ny; z += target.nz; }
     if (y < 0 || y >= CH) return;
     const cur = world.getBlock(x, y, z);
     if (!isReplaceable(cur)) return;
+    if (d.egg) {
+      const m = mobs.spawn(d.egg, x + 0.5, y + 0.01, z + 0.5, { yaw: player.yaw + Math.PI });
+      if (!m) toast('Too many animals (max ' + mobs.max + ')'); else { toast((d.egg === 'dog' ? 'Dog' : 'Cat') + ' spawned — right-click / tap it to tame'); dirtySave = true; }
+      return;
+    }
+    if (id === B.TORCH) {
+      const support = onPlant ? world.getBlock(x, y - 1, z) : target.id;
+      if (!VC.Blocks.SOLID[support] || VC.Blocks.RENDER[support] === 5) return;
+      if (!onPlant && target.ny === -1) return;            // no ceiling torches
+      if (!onPlant && target.ny === 0) id = WALL_TORCH[target.nx + ',' + target.nz];
+    }
     if (VC.Blocks.SOLID[id] && player.intersectsBlock(x, y, z)) return;
     if (VC.Blocks.RENDER[id] === 4) { const below = world.getBlock(x, y - 1, z); if (below !== B.GRASS && below !== B.DIRT && below !== B.SNOW) return; }
     world.setBlock(x, y, z, id);
   }
   function pickBlock() {
-    if (!target || !defs[target.id].placeable) return;
-    const i = hotbar.indexOf(target.id);
-    if (i >= 0) select(i); else { hotbar[selected] = target.id; buildHotbar(); toast(defs[target.id].name); }
+    if (!target) return;
+    const d = defs[target.id], id = d.item || target.id;
+    if (!defs[id].placeable) return;
+    const i = hotbar.indexOf(id);
+    if (i >= 0) select(i); else { hotbar[selected] = id; buildHotbar(); toast(defs[id].name); }
   }
 
   // ---------- HUD ----------
@@ -388,7 +437,7 @@
       `Chunk: ${Math.floor(p.x / CS)}, ${Math.floor(p.z / CS)}   Facing: ${facing}\n` +
       `Chunks: ${meshed} rendered / ${world.chunks.size} loaded  (RD ${settings.renderDistance})\n` +
       `Time: ${timeString()}   Mode: ${player.flying ? 'flying' : player.inWater ? 'swimming' : 'walking'}\n` +
-      `Target: ${tgt}\n` +
+      `Target: ${targetMob ? (targetMob.tamed ? 'Tamed ' : '') + targetMob.type : tgt}   Animals: ${mobs.list.length}/${mobs.max}\n` +
       `Draw calls: ${renderer.info.render.calls}  Tris: ${(renderer.info.render.triangles / 1000).toFixed(0)}k`;
   }
 
@@ -406,6 +455,18 @@
     updateSky(playing ? dt : dt * 0.25);
     // target + outline
     target = playing ? player.raycast(6) : null;
+    targetMob = null;
+    if (playing && mobs.list.length) {
+      const dir = new THREE.Vector3(0, 0, -1).applyEuler(camera.rotation);
+      const mh = mobs.raycast(camera.position, dir, 5);
+      // plants/torches occupy a whole cell for ray picking; let animals standing in them win
+      if (mh && (!target || mh.t < target.t || VC.Blocks.RENDER[target.id] >= 4)) { targetMob = mh.mob; target = null; }
+    }
+    if (playing) {
+      mobs.update(dt, player, currentDaylight);
+      if (pendingMobs) { const c = world.getChunk(Math.floor(player.pos.x / CS), Math.floor(player.pos.z / CS)); if (c && c.meshes && !player.frozen) { mobs.load(pendingMobs); pendingMobs = null; } }
+    }
+    lightUniforms.uTime.value = now / 1000;
     if (target) { selBox.visible = true; selBox.position.set(target.x + 0.5, target.y + 0.5, target.z + 0.5); } else selBox.visible = false;
     if (playing && (mouse.left || mouse.right)) { mouse.timer -= dt; if (mouse.timer <= 0) { mouse.timer = 0.22; if (mouse.left) breakBlock(); else placeBlock(); } }
     if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) $('toast').style.opacity = 0; }
@@ -429,5 +490,5 @@
   requestAnimationFrame(frame);
 
   // Expose for debugging / automated tests
-  window.game = { perf, play, isMobile: MOBILE, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => { player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; } };
+  window.game = { perf, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, isMobile: MOBILE, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => { player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; } };
 })();

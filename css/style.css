@@ -100,3 +100,7 @@ html.mobile .inv-item canvas { width: 46px; height: 46px; }
   html.mobile #tb-top { top: calc(max(6px, env(safe-area-inset-top)) + 50px); }
   html.mobile #hud { top: calc(max(6px, env(safe-area-inset-top)) + 50px); }
 }
+#inventory .panel { max-height: calc(100vh - 40px); overflow-y: auto; }
+.inv-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; position: sticky; top: -26px; background: rgba(25,25,30,0.97); z-index: 1; padding: 4px 0; }
+.inv-head h2 { margin: 0; }
+html.mobile .inv-head { top: -16px; }

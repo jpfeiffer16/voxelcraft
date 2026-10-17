@@ -129,7 +129,7 @@ window.VC = window.VC || {};
       let nx = 0, ny = 0, nz = 0, t = 0;
       while (t <= maxDist) {
         const id = this.world.getBlock(x, y, z);
-        if (id > 0 && id !== B.WATER) return { x, y, z, nx, ny, nz, id };
+        if (id > 0 && id !== B.WATER) return { x, y, z, nx, ny, nz, id, t };
         if (tmx < tmy && tmx < tmz) { x += sx; t = tmx; tmx += tdx; nx = -sx; ny = 0; nz = 0; }
         else if (tmy < tmz) { y += sy; t = tmy; tmy += tdy; nx = 0; ny = -sy; nz = 0; }
         else { z += sz; t = tmz; tmz += tdz; nx = 0; ny = 0; nz = -sz; }

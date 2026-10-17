@@ -128,6 +128,77 @@ window.VC = window.VC || {};
   P[T.glowstone] = (t) => { t.fill([200, 160, 80], 20); for (let i = 0; i < 40; i++) t.set((t.rnd() * 16) | 0, (t.rnd() * 16) | 0, [255, 235, 160]); t.speckle([140, 100, 50], 0.12, 10); };
   P[T.obsidian] = (t) => { t.fill([22, 16, 34], 6); t.speckle([60, 40, 90], 0.15, 12); };
 
+  // ---- added content ----
+  const clear = (t) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) t.set(x, y, [0, 0, 0], 0); };
+  P[T.torch] = (t) => {
+    clear(t);
+    for (let y = 10; y < 16; y++) { t.set(7, y, t.vary([120, 85, 45], 8)); t.set(8, y, t.vary([95, 66, 34], 8)); }
+    t.set(7, 6, [255, 250, 210]); t.set(8, 6, [255, 236, 150]); t.set(7, 7, [255, 220, 90]); t.set(8, 7, [255, 245, 170]);
+    t.set(7, 8, [250, 170, 40]); t.set(8, 8, [255, 200, 70]); t.set(7, 9, [210, 110, 30]); t.set(8, 9, [230, 140, 40]);
+    t.set(7, 5, [255, 210, 120], 200); t.set(8, 4, [255, 190, 90], 140);
+  };
+  P[T.lantern] = (t) => {
+    clear(t);
+    for (let y = 7; y < 16; y++) for (let x = 5; x < 11; x++) {
+      const edge = x === 5 || x === 10 || y === 7 || y === 15;
+      const bar = !edge && (x === 7 || x === 8) && (y === 10 || y === 13);
+      t.set(x, y, edge ? t.vary([55, 58, 66], 6) : bar ? [80, 70, 60] : t.vary(y > 10 ? [255, 190, 80] : [255, 225, 130], 12));
+    }
+    for (let x = 6; x < 10; x++) { t.set(x, 5, [60, 62, 70]); t.set(x, 6, [72, 74, 82]); }
+    t.set(7, 3, [70, 70, 78]); t.set(8, 3, [70, 70, 78]); t.set(6, 4, [70, 70, 78]); t.set(9, 4, [70, 70, 78]);
+  };
+  P[T.lantern_top] = (t) => { t.fill([60, 62, 70], 5); for (let y = 6; y < 10; y++) for (let x = 6; x < 10; x++) t.set(x, y, [255, 200, 100]); };
+  P[T.craft_top] = (t) => {
+    P[T.planks](t);
+    for (let i = 0; i < 16; i++) { t.set(i, 0, [95, 70, 40]); t.set(i, 15, [95, 70, 40]); t.set(0, i, [95, 70, 40]); t.set(15, i, [95, 70, 40]); }
+    for (let y = 3; y < 13; y++) for (let x = 3; x < 13; x++) if (x % 3 === 0 || y % 3 === 0) t.set(x, y, [110, 82, 48]);
+  };
+  P[T.craft_side] = (t) => {
+    P[T.planks](t);
+    for (let x = 0; x < 16; x++) { t.set(x, 0, [95, 70, 40]); t.set(x, 1, [130, 100, 60]); }
+    for (let y = 4; y < 12; y++) t.set(4, y, [120, 120, 125]); for (let x = 2; x < 7; x++) t.set(x, 4, [150, 150, 155]); // hammer
+    for (let y = 5; y < 13; y++) t.set(11, y, [110, 80, 45]); for (let y = 3; y < 7; y++) { t.set(10, y, [170, 170, 175]); t.set(12, y, [170, 170, 175]); }
+  };
+  P[T.pumpkin_side] = (t) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) t.set(x, y, t.vary(x % 4 === 0 ? [190, 100, 20] : [225, 135, 30], 8)); };
+  P[T.pumpkin_top] = (t) => { P[T.pumpkin_side](t); for (let y = 6; y < 10; y++) for (let x = 6; x < 10; x++) t.set(x, y, t.vary([110, 90, 40], 8)); };
+  P[T.jack_face] = (t) => {
+    P[T.pumpkin_side](t);
+    const glow = (x, y) => t.set(x, y, t.vary([255, 220, 90], 15));
+    for (let i = 0; i < 3; i++) for (let j = 0; j <= i; j++) { glow(3 + j, 4 + i); glow(4 - j + 0, 4 + i); glow(11 + j, 4 + i); glow(12 - j, 4 + i); }
+    for (let x = 3; x < 13; x++) { glow(x, 10); if (x !== 5 && x !== 10) glow(x, 11); if (x > 4 && x < 11) glow(x, 12); }
+  };
+  function wool(c) { return (t) => { t.fill(c, 9); t.speckle([c[0] * 0.85, c[1] * 0.85, c[2] * 0.85], 0.22, 5); }; }
+  P[T.wool_yellow] = wool([240, 200, 50]); P[T.wool_lime] = wool([125, 200, 40]); P[T.wool_green] = wool([75, 105, 35]);
+  P[T.wool_orange] = wool([235, 125, 35]); P[T.wool_purple] = wool([125, 55, 175]); P[T.wool_cyan] = wool([30, 140, 150]);
+  P[T.wool_pink] = wool([235, 140, 170]); P[T.wool_black] = wool([30, 30, 36]); P[T.wool_gray] = wool([75, 78, 82]);
+  P[T.mossy_cobble] = (t) => { P[T.cobble](t); for (let i = 0; i < 40; i++) { const x = (t.rnd() * 16) | 0, y = (t.rnd() * 16) | 0; t.set(x, y, t.vary([80, 120, 50], 12)); if (t.rnd() < 0.5) t.set(x + 1, y, t.vary([70, 110, 45], 12)); } };
+  P[T.hay_side] = (t) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { let c = t.rnd() < 0.3 ? [190, 150, 40] : [220, 185, 60]; if (y === 4 || y === 11) c = [150, 60, 40]; t.set(x, y, t.vary(c, 8)); } };
+  P[T.hay_top] = (t) => { t.fill([205, 170, 55], 14); t.speckle([170, 130, 35], 0.3, 6); };
+  P[T.melon_side] = (t) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) t.set(x, y, t.vary(x % 5 < 2 ? [95, 150, 35] : [130, 175, 45], 8)); };
+  P[T.melon_top] = (t) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)) | 0; t.set(x, y, t.vary(d % 3 === 0 ? [95, 150, 35] : [130, 175, 45], 8)); } };
+  P[T.terracotta] = (t) => { t.fill([160, 88, 62], 6); t.speckle([145, 78, 55], 0.2, 4); };
+  P[T.flower_blue] = (t) => plant(t, [40, 160, 230]);
+  P[T.flower_tulip] = (t) => plant(t, [240, 120, 170]);
+  P[T.mushroom] = (t) => {
+    clear(t);
+    for (let y = 9; y < 16; y++) { t.set(7, y, [225, 215, 195]); t.set(8, y, [210, 200, 180]); }
+    for (let y = 4; y < 9; y++) for (let x = 3; x < 13; x++) { if (y === 4 && (x < 5 || x > 10)) continue; t.set(x, y, t.vary([200, 30, 30], 12)); }
+    t.set(5, 6, [250, 250, 250]); t.set(9, 5, [250, 250, 250]); t.set(11, 7, [250, 250, 250]); t.set(7, 7, [250, 250, 250]);
+  };
+  function egg(base, spot) {
+    return (t) => {
+      clear(t);
+      for (let y = 1; y < 15; y++) for (let x = 2; x < 14; x++) {
+        const dx = (x - 7.5) / 5.5, dy = (y - 8.5) / (y < 8.5 ? 7.5 : 6.5);
+        if (dx * dx + dy * dy <= 1) t.set(x, y, t.vary(base, 8));
+      }
+      for (let i = 0; i < 9; i++) { const x = 4 + ((t.rnd() * 8) | 0), y = 3 + ((t.rnd() * 10) | 0); if (t.get(x, y)[3]) { t.set(x, y, spot); if (t.get(x + 1, y)[3]) t.set(x + 1, y, spot); } }
+      t.set(5, 4, [255, 255, 255], 200);
+    };
+  }
+  P[T.dog_egg] = egg([225, 205, 170], [130, 85, 50]);
+  P[T.cat_egg] = egg([240, 160, 70], [60, 45, 40]);
+
   function buildAtlas() {
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
@@ -154,7 +225,7 @@ window.VC = window.VC || {};
     ctx.clearRect(0, 0, size, size);
     ctx.imageSmoothingEnabled = false;
     const src = (t) => [(t % COLS) * S, Math.floor(t / COLS) * S];
-    if (d.render === 'cross') { const [sx, sy] = src(d.side); ctx.drawImage(atlas, sx, sy, S, S, size * 0.1, size * 0.1, size * 0.8, size * 0.8); return; }
+    if (d.render === 'cross' || d.render === 'item' || d.render === 'model') { const [sx, sy] = src(d.side); ctx.drawImage(atlas, sx, sy, S, S, size * 0.1, size * 0.1, size * 0.8, size * 0.8); return; }
     const s = size / 2 * 0.92, cx = size / 2, top = size * 0.04;
     const k = s / S;
     // top face
