@@ -16,6 +16,7 @@ window.VC = window.VC || {};
       this.keys = {};
       this.lastSpace = 0;
       this.bob = 0;
+      this.analog = { x: 0, y: 0 }; this.touchSprint = false;
       this.frozen = true; // until chunk under player is loaded
     }
     isSolidAt(x, y, z) {
@@ -69,14 +70,15 @@ window.VC = window.VC || {};
         const c = w.getChunk(Math.floor(this.pos.x / 16), Math.floor(this.pos.z / 16));
         if (c && c.meshes) this.frozen = false; else { this.updateCamera(0); return; }
       }
-      const fwd = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0);
-      const strafe = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
-      const sprint = k.ShiftLeft && !this.flying || k.ControlLeft || k.ControlRight || k.ShiftRight;
+      const an = this.analog; // touch joystick (-1..1), y = forward
+      const fwd = Math.max(-1, Math.min(1, (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0) + an.y));
+      const strafe = Math.max(-1, Math.min(1, (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0) + an.x));
+      const sprint = k.ShiftLeft && !this.flying || k.ControlLeft || k.ControlRight || k.ShiftRight || this.touchSprint;
       let speed = this.flying ? (sprint ? 22 : 11) : sprint && fwd > 0 ? 5.8 : 4.3;
       if (this.inWater && !this.flying) speed *= 0.55;
       const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
       let mx = -sin * fwd + cos * strafe, mz = -cos * fwd - sin * strafe;
-      const ml = Math.hypot(mx, mz); if (ml > 0) { mx /= ml; mz /= ml; }
+      const ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
       const accel = this.onGround || this.flying ? 14 : this.inWater ? 6 : 4;
       const t = Math.min(1, accel * dt);
       this.vel.x += (mx * speed - this.vel.x) * t;

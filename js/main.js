@@ -4,13 +4,14 @@
   const { CS, CH, SEA, SAVE_KEY } = VC.CONST;
   const B = VC.B, defs = VC.Blocks.defs;
   const $ = (id) => document.getElementById(id);
-  const SETTINGS_KEY = 'voxelcraft.settings.v1';
+  const MOBILE = !!VC.isMobile;
+  const SETTINGS_KEY = MOBILE ? 'voxelcraft.settings.mobile.v1' : 'voxelcraft.settings.v1';
   const DAY_LENGTH = 600; // seconds per full day
 
   window.addEventListener('error', (e) => { const el = $('error'); el.classList.remove('hidden'); el.textContent += (e.message || e) + '\n'; });
 
   // ---------- settings ----------
-  const settings = Object.assign({ renderDistance: 8, sensitivity: 8, fov: 75, showDebug: true }, safeParse(localStorage.getItem(SETTINGS_KEY)) || {});
+  const settings = Object.assign({ renderDistance: MOBILE ? 4 : 8, sensitivity: 8, fov: MOBILE ? 70 : 75, showDebug: !MOBILE, tilt: true, tiltSens: 10, lookSens: 10 }, safeParse(localStorage.getItem(SETTINGS_KEY)) || {});
   function safeParse(s) { try { return s ? JSON.parse(s) : null; } catch (e) { return null; } }
   function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {} }
 
@@ -18,7 +19,7 @@
   THREE.ColorManagement.enabled = false;
   const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MOBILE ? 1 : 1.5));
   renderer.setSize(window.innerWidth, window.innerHeight);
   $('game').appendChild(renderer.domElement);
   const scene = new THREE.Scene();
@@ -72,6 +73,7 @@
   let selected = 0;
   let saveTimer = 0, dirtySave = false;
   const testMode = /[?&]test=1/.test(location.search);
+  const noLock = testMode || MOBILE; // touch devices never use pointer lock
 
   function hashSeed(s) { s = String(s).trim(); if (/^-?\d+$/.test(s)) return parseInt(s, 10) | 0; let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h | 0; }
 
@@ -83,6 +85,7 @@
   function findSpawn(gen) {
     // Dry grass column above sea level, preferring one with trees close by.
     const ok = (x, z) => { const h = gen.height(x, z); return h > SEA + 3 && h < 80 && gen.temperature(x, z) < 0.3 && !gen.treeAt(x, z) && !gen.isCave(x, h, z, h) && !gen.isCave(x, h - 1, z, h) ? h : -1; };
+    const clearOfCanopy = (x, z) => { for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) if (gen.treeAt(x + dx, z + dz)) return false; return true; };
     const treesNear = (x, z) => { let n = 0; for (let dz = -7; dz <= 7; dz++) for (let dx = -7; dx <= 7; dx++) if (gen.treeAt(x + dx, z + dz)) n++; return n; };
     for (let pass = 0; pass < 2; pass++) {
       for (let r = 0; r < 1200; r += 6) {
@@ -91,6 +94,7 @@
           const x = Math.round(Math.cos(a / steps * Math.PI * 2) * r), z = Math.round(Math.sin(a / steps * Math.PI * 2) * r);
           const h = ok(x, z);
           if (h < 0) continue;
+          if (clearOfCanopy(x, z) === false) continue;
           if (pass === 0 && treesNear(x, z) < 2) continue;
           return [x + 0.5, h + 1.01, z + 0.5];
         }
@@ -230,8 +234,10 @@
       const s = document.createElement('div'); s.className = 'slot' + (i === selected ? ' sel' : '');
       s.appendChild(iconCanvas(id, 64));
       const n = document.createElement('span'); n.className = 'num'; n.textContent = i + 1; s.appendChild(n);
+      s.addEventListener('click', (e) => { e.stopPropagation(); if (state === 'playing') select(i); });
       hb.appendChild(s);
     });
+    if (MOBILE) { const m = document.createElement('div'); m.className = 'slot menu-slot'; m.textContent = '⋯'; m.addEventListener('click', (e) => { e.stopPropagation(); if (state === 'playing') setState('inventory'); }); hb.appendChild(m); }
   }
   let toastTimer = 0;
   function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.opacity = 1; toastTimer = 1.6; }
@@ -257,9 +263,16 @@
     show('start', s === 'title'); show('pause', s === 'paused'); show('inventory', s === 'inventory');
     show('hud', s !== 'title' && settings.showDebug);
     for (const k in player.keys) player.keys[k] = false;
+    if (window.game && window.game.onState) window.game.onState(s);
     if (s === 'paused') { saveGame(); $('save-status').textContent = 'World saved automatically.'; }
   }
-  function play() { if (testMode) { setState('playing'); return; } lockPointer(); setState('playing'); }
+  function play() {
+    if (noLock) {
+      if (MOBILE && !testMode && !document.fullscreenElement && document.documentElement.requestFullscreen) { try { const p = document.documentElement.requestFullscreen({ navigationUI: 'hide' }); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+      setState('playing'); return;
+    }
+    lockPointer(); setState('playing');
+  }
   document.addEventListener('pointerlockchange', () => {
     if (document.pointerLockElement === canvas) { if (state !== 'playing') setState('playing'); }
     else if (state === 'playing') setState('paused');
@@ -276,6 +289,8 @@
   $('btn-resume').addEventListener('click', play);
   $('btn-save').addEventListener('click', () => { $('save-status').textContent = saveGame() ? 'Saved at ' + new Date().toLocaleTimeString() : 'Save failed (storage full?)'; });
   $('btn-title').addEventListener('click', () => { saveGame(); setState('title'); });
+  $('btn-inv-done').addEventListener('click', play);
+  { const chk = $('chk-debug'); chk.checked = settings.showDebug; chk.addEventListener('change', () => { settings.showDebug = chk.checked; saveSettings(); }); }
   function bindSlider(id, key, fmt, apply) {
     const el = $(id), val = $(id + '-val');
     el.value = settings[key]; val.textContent = fmt(settings[key]);
@@ -287,7 +302,7 @@
 
   // ---------- input ----------
   document.addEventListener('mousemove', (e) => {
-    if (state !== 'playing' || (!testMode && document.pointerLockElement !== canvas)) return;
+    if (state !== 'playing' || (!noLock && document.pointerLockElement !== canvas)) return;
     const s = settings.sensitivity * 0.00025;
     player.yaw -= e.movementX * s; player.pitch -= e.movementY * s;
     player.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, player.pitch));
@@ -295,7 +310,7 @@
   const mouse = { left: false, right: false, timer: 0 };
   canvas.addEventListener('mousedown', (e) => {
     if (state !== 'playing') return;
-    if (!testMode && document.pointerLockElement !== canvas) { lockPointer(); return; }
+    if (!noLock && document.pointerLockElement !== canvas) { lockPointer(); return; }
     if (e.button === 0) { mouse.left = true; mouse.timer = 0.25; breakBlock(); }
     else if (e.button === 2) { mouse.right = true; mouse.timer = 0.25; placeBlock(); }
     else if (e.button === 1) { e.preventDefault(); pickBlock(); }
@@ -414,5 +429,5 @@
   requestAnimationFrame(frame);
 
   // Expose for debugging / automated tests
-  window.game = { perf, get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; } };
+  window.game = { perf, play, isMobile: MOBILE, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => { player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; } };
 })();

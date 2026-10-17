@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1b1b20">
 <title>VoxelCraft</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -15,6 +19,24 @@
 <div id="toast"></div>
 <div id="hotbar"></div>
 
+<div id="touch-ui" class="hidden">
+  <div id="joy-zone"></div>
+  <div id="joy-base"><div id="joy-knob"></div></div>
+  <div id="tb-top">
+    <button class="tbtn small" id="tb-tilt" title="Tilt look">📱</button>
+    <button class="tbtn small" id="tb-recenter" title="Recenter view">◎</button>
+    <button class="tbtn small" id="tb-menu" title="Menu">☰</button>
+  </div>
+  <div id="tb-actions">
+    <button class="tbtn" id="tb-break" title="Break">⛏</button>
+    <button class="tbtn" id="tb-place" title="Place">▣</button>
+    <button class="tbtn" id="tb-sprint" title="Sprint">»</button>
+    <button class="tbtn" id="tb-fly" title="Fly">✈</button>
+    <button class="tbtn" id="tb-down" title="Fly down">▼</button>
+    <button class="tbtn big" id="tb-jump" title="Jump / fly up">▲</button>
+  </div>
+</div>
+
 <div id="start" class="overlay">
   <div class="panel">
     <h1>VoxelCraft</h1>
@@ -26,7 +48,15 @@
       <button id="btn-new">New World</button>
     </div>
     <div id="world-info"></div>
-    <div class="controls">
+    <div class="row mobile-only"><button id="btn-tilt-start" class="tilt-btn">Enable tilt look</button></div>
+    <div class="controls mobile-only">
+      <div><b>Left thumb</b> drag to move</div><div><b>Right side</b> drag to look</div>
+      <div><b>Tap</b> place block</div><div><b>Hold</b> break block</div>
+      <div><b>▲</b> jump / swim / fly up</div><div><b>✈</b> fly · <b>»</b> sprint</div>
+      <div><b>Tilt phone</b> to aim (📱 toggle)</div><div><b>◎</b> recenter · <b>☰</b> menu</div>
+      <div><b>Hotbar</b> tap to select</div><div><b>⋯</b> all blocks</div>
+    </div>
+    <div class="controls desktop-only">
       <div><b>Mouse</b> look</div><div><b>W A S D</b> move</div>
       <div><b>Space</b> jump / swim</div><div><b>Shift</b> sprint (fly: down)</div>
       <div><b>F</b> or <b>double-tap Space</b> fly</div><div><b>Ctrl</b> fast fly</div>
@@ -43,8 +73,14 @@
     <h2>Paused</h2>
     <button id="btn-resume" class="big">Resume</button>
     <label>Render distance: <span id="rd-val"></span> chunks<input id="rd" type="range" min="3" max="16" step="1"></label>
-    <label>Mouse sensitivity: <span id="sens-val"></span><input id="sens" type="range" min="1" max="20" step="1"></label>
+    <div class="mobile-only">
+      <div class="row"><button id="btn-tilt-pause" class="tilt-btn">Enable tilt look</button><button id="btn-recenter">Recenter</button></div>
+      <label>Tilt sensitivity: <span id="tiltSens-val"></span><input id="tiltSens" type="range" min="2" max="25" step="1"></label>
+      <label>Touch look sensitivity: <span id="lookSens-val"></span><input id="lookSens" type="range" min="2" max="25" step="1"></label>
+    </div>
+    <label class="desktop-only">Mouse sensitivity: <span id="sens-val"></span><input id="sens" type="range" min="1" max="20" step="1"></label>
     <label>Field of view: <span id="fov-val"></span><input id="fov" type="range" min="50" max="110" step="1"></label>
+    <label class="check"><input type="checkbox" id="chk-debug"> Show debug info (F3)</label>
     <div class="row"><button id="btn-save">Save World</button><button id="btn-title">Quit to Title</button></div>
     <div id="save-status"></div>
   </div>
@@ -55,11 +91,13 @@
     <h2>Blocks</h2>
     <p class="sub">Click a block to put it in the selected hotbar slot. Press E to close.</p>
     <div id="inv-grid"></div>
+    <div class="row"><button id="btn-inv-done">Done</button></div>
   </div>
 </div>
 
 <div id="error" class="hidden"></div>
 
+<script src="js/platform.js"></script>
 <script src="vendor/three.min.js"></script>
 <script src="js/noise.js"></script>
 <script src="js/blocks.js"></script>
@@ -68,5 +106,6 @@
 <script src="js/mesher.js"></script>
 <script src="js/player.js"></script>
 <script src="js/main.js"></script>
+<script src="js/mobile.js"></script>
 </body>
 </html>
