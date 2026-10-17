@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxelCraft</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="game"></div>
+<div id="water-overlay"></div>
+<div id="vignette"></div>
+<div id="crosshair"></div>
+<div id="hud" class="hidden"><div id="debug"></div></div>
+<div id="toast"></div>
+<div id="hotbar"></div>
+
+<div id="start" class="overlay">
+  <div class="panel">
+    <h1>VoxelCraft</h1>
+    <p class="sub">A single-player voxel sandbox in your browser</p>
+    <button id="btn-play" class="big">Click to Play</button>
+    <div id="loading">Generating terrain…</div>
+    <div class="row">
+      <input id="seed" placeholder="Seed (blank = random)" maxlength="32">
+      <button id="btn-new">New World</button>
+    </div>
+    <div id="world-info"></div>
+    <div class="controls">
+      <div><b>Mouse</b> look</div><div><b>W A S D</b> move</div>
+      <div><b>Space</b> jump / swim</div><div><b>Shift</b> sprint (fly: down)</div>
+      <div><b>F</b> or <b>double-tap Space</b> fly</div><div><b>Ctrl</b> fast fly</div>
+      <div><b>Left click</b> break</div><div><b>Right click</b> place</div>
+      <div><b>Middle click</b> pick block</div><div><b>1–9 / wheel</b> hotbar</div>
+      <div><b>E</b> block inventory</div><div><b>F3</b> debug info</div>
+      <div><b>Esc</b> pause / settings</div><div>World edits auto-save</div>
+    </div>
+  </div>
+</div>
+
+<div id="pause" class="overlay hidden">
+  <div class="panel">
+    <h2>Paused</h2>
+    <button id="btn-resume" class="big">Resume</button>
+    <label>Render distance: <span id="rd-val"></span> chunks<input id="rd" type="range" min="3" max="16" step="1"></label>
+    <label>Mouse sensitivity: <span id="sens-val"></span><input id="sens" type="range" min="1" max="20" step="1"></label>
+    <label>Field of view: <span id="fov-val"></span><input id="fov" type="range" min="50" max="110" step="1"></label>
+    <div class="row"><button id="btn-save">Save World</button><button id="btn-title">Quit to Title</button></div>
+    <div id="save-status"></div>
+  </div>
+</div>
+
+<div id="inventory" class="overlay hidden">
+  <div class="panel wide">
+    <h2>Blocks</h2>
+    <p class="sub">Click a block to put it in the selected hotbar slot. Press E to close.</p>
+    <div id="inv-grid"></div>
+  </div>
+</div>
+
+<div id="error" class="hidden"></div>
+
+<script src="vendor/three.min.js"></script>
+<script src="js/noise.js"></script>
+<script src="js/blocks.js"></script>
+<script src="js/textures.js"></script>
+<script src="js/world.js"></script>
+<script src="js/mesher.js"></script>
+<script src="js/player.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
