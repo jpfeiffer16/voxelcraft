@@ -17,7 +17,9 @@
 <div id="vignette"></div>
 <div id="crosshair"></div>
 <div id="hud" class="hidden"><div id="debug"></div></div>
+<div id="hurt-overlay"></div>
 <div id="toast"></div>
+<div id="hearts" class="hidden"></div>
 <div id="hotbar"></div>
 
 <div id="touch-ui" class="hidden">
@@ -54,18 +56,18 @@
     <div class="row mobile-only tilt-only"><button id="btn-tilt-start" class="tilt-btn">Enable tilt look</button></div>
     <div class="controls mobile-only">
       <div><b>Left thumb</b> drag to move</div><div><b>Right side</b> drag to look</div>
-      <div><b>Tap</b> place block / tame pet</div><div><b>Hold</b> break block</div>
+      <div><b>Tap</b> place / tame / light TNT</div><div><b>Hold</b> break block / attack</div>
       <div><b>▲</b> jump / swim / fly up</div><div><b>✈</b> fly · <b>»</b> sprint</div>
       <div class="tilt-only"><b>Tilt phone</b> to aim (📱 toggle)</div><div><b>◎</b> recenter · <b>☰</b> menu</div>
-      <div><b>Hotbar</b> tap to select</div><div><b>⋯</b> torches, pets, blocks</div>
+      <div><b>Hotbar</b> tap to select</div><div><b>⋯</b> TNT, torches, pets, blocks</div>
     </div>
     <div class="controls desktop-only">
       <div><b>Mouse</b> look</div><div><b>W A S D</b> move</div>
       <div><b>Space</b> jump / swim</div><div><b>Shift</b> sprint (fly: down)</div>
       <div><b>F</b> or <b>double-tap Space</b> fly</div><div><b>Ctrl</b> fast fly</div>
-      <div><b>Left click</b> break</div><div><b>Right click</b> place</div>
-      <div><b>Right click pet</b> tame / sit / follow</div><div><b>1–9 / wheel</b> hotbar</div>
-      <div><b>E</b> block menu (torches, pets…)</div><div><b>F3</b> debug · <b>T</b> touch controls</div>
+      <div><b>Left click</b> break / attack</div><div><b>Right click</b> place / light TNT</div>
+      <div><b>Right click pet</b> tame / sit / follow (lions guard you)</div><div><b>1–9 / wheel</b> hotbar</div>
+      <div><b>E</b> block menu (TNT, torches, pets…)</div><div><b>F3</b> debug · <b>T</b> touch controls</div>
       <div><b>Esc</b> pause / settings</div><div><b>Middle click</b> pick block</div>
     </div>
   </div>
@@ -86,15 +88,25 @@
     <label class="desktop-only">Mouse sensitivity: <span id="sens-val"></span><input id="sens" type="range" min="1" max="20" step="1"></label>
     <label>Field of view: <span id="fov-val"></span><input id="fov" type="range" min="50" max="110" step="1"></label>
     <label class="check"><input type="checkbox" id="chk-debug"> Show debug info (F3)</label>
-    <label class="check"><input type="checkbox" id="chk-sound"> Animal sounds</label>
+    <label class="check"><input type="checkbox" id="chk-hostile"> Hostile mobs (zombies at night &amp; in caves)</label>
+    <label class="check"><input type="checkbox" id="chk-sound"> Sounds</label>
     <div class="row"><button id="btn-save">Save World</button><button id="btn-title">Quit to Title</button></div>
     <div id="save-status"></div>
   </div>
 </div>
 
+<div id="dead" class="overlay hidden">
+  <div class="panel dead-panel">
+    <h1>You died!</h1>
+    <p class="sub" id="dead-msg">Your world is safe — respawn at the spawn point.</p>
+    <button id="btn-respawn" class="big">Respawn</button>
+    <div class="row"><button id="btn-dead-title">Quit to Title</button></div>
+  </div>
+</div>
+
 <div id="inventory" class="overlay hidden">
   <div class="panel wide">
-    <div class="inv-head"><h2>Blocks, Torches &amp; Pets</h2><button id="btn-inv-close">Done</button></div>
+    <div class="inv-head"><h2>Blocks, TNT &amp; Pets</h2><button id="btn-inv-close">Done</button></div>
     <p class="sub">Click a block to put it in the selected hotbar slot. Press E to close.</p>
     <div id="inv-grid"></div>
     <div class="row"><button id="btn-inv-done">Done</button></div>
@@ -112,6 +124,7 @@
 <script src="js/mesher.js"></script>
 <script src="js/player.js"></script>
 <script src="js/mobs.js"></script>
+<script src="js/tnt.js"></script>
 <script src="js/main.js"></script>
 <script src="js/mobile.js"></script>
 </body>

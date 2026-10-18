@@ -12,7 +12,7 @@
   window.addEventListener('error', (e) => { const el = $('error'); el.classList.remove('hidden'); el.textContent += (e.message || e) + '\n'; });
 
   // ---------- settings ----------
-  const settings = Object.assign({ renderDistance: MOBILE ? 4 : 8, sensitivity: 8, fov: MOBILE ? 70 : 75, showDebug: !MOBILE, tilt: true, tiltSens: 10, lookSens: 10, sound: true }, safeParse(localStorage.getItem(SETTINGS_KEY)) || {});
+  const settings = Object.assign({ renderDistance: MOBILE ? 4 : 8, sensitivity: 8, fov: MOBILE ? 70 : 75, showDebug: !MOBILE, tilt: true, tiltSens: 10, lookSens: 10, sound: true, hostile: true }, safeParse(localStorage.getItem(SETTINGS_KEY)) || {});
   function safeParse(s) { try { return s ? JSON.parse(s) : null; } catch (e) { return null; } }
   function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {} }
 
@@ -81,10 +81,10 @@
 
   // ---------- game state ----------
   let world = null, player = null;
-  let state = 'title'; // title | playing | paused | inventory
+  let state = 'title'; // title | playing | paused | inventory | dead
   let worldTime = 0.05;
-  let hotbar = [B.GRASS, B.DIRT, B.STONE, B.COBBLE, B.PLANKS, B.LOG, B.TORCH, B.DOG_EGG, B.CAT_EGG];
-  let mobs = null;
+  let hotbar = [B.GRASS, B.DIRT, B.STONE, B.PLANKS, B.LOG, B.TORCH, B.TNT, B.DOG_EGG, B.LION_EGG];
+  let mobs = null, tnt = null, spawnPoint = null;
   let selected = 0;
   let saveTimer = 0, dirtySave = false;
   const testMode = /[?&]test=1/.test(location.search);
@@ -122,20 +122,28 @@
     pendingMobs = null;
     world = new VC.World(seed);
     if (mobs) mobs.dispose();
-    mobs = new VC.Mobs(scene, world, { max: MOBILE ? 10 : 20, maxWild: MOBILE ? 4 : 6 });
-    mobs.sound = settings.sound;
+    mobs = new VC.Mobs(scene, world, { max: MOBILE ? 10 : 20, maxWild: MOBILE ? 4 : 6, maxZombies: MOBILE ? 4 : 8, maxWildLions: MOBILE ? 1 : 2 });
+    mobs.sound = settings.sound; mobs.hostile = settings.hostile !== false;
+    mobs.onPlayerDamage = (amt, m) => { if (!settings.hostile) return; if (player.hurt(amt, m.pos, m, 5)) onHurt(); };
+    if (tnt) tnt.dispose();
+    tnt = new VC.Explosives(scene, world, tex, { maxPrimed: MOBILE ? 10 : 20, perFrame: MOBILE ? 1 : 2, maxParticles: MOBILE ? 140 : 260 });
+    tnt.sound = settings.sound; tnt.onExplode = onExplode; tnt.onBlocksChanged = () => { dirtySave = true; };
     world.onEdit = () => { dirtySave = true; };
     player = new VC.Player(world, camera);
     if (save) {
       world.loadEdits(save);
-      if (save.player) { player.pos.set(save.player.x, save.player.y, save.player.z); player.yaw = save.player.yaw || 0; player.pitch = save.player.pitch || 0; player.flying = !!save.player.flying; }
+      if (save.player) { player.pos.set(save.player.x, save.player.y, save.player.z); player.yaw = save.player.yaw || 0; player.pitch = save.player.pitch || 0; player.flying = !!save.player.flying; if (save.player.hp > 0) player.health = Math.min(player.maxHealth, save.player.hp); }
+      if (Array.isArray(save.spawn)) spawnPoint = save.spawn;
       if (typeof save.time === 'number') worldTime = save.time;
       if (Array.isArray(save.mobs)) pendingMobs = save.mobs;
       if (Array.isArray(save.hotbar) && save.hotbar.length === 9) hotbar = save.hotbar.map(id => defs[id] && defs[id].placeable ? id : B.STONE);
     } else {
       const [x, y, z] = findSpawn(world.gen);
       player.pos.set(x, y, z); worldTime = 0.05;
+      spawnPoint = [x, y, z];
     }
+    if (!spawnPoint) spawnPoint = findSpawn(world.gen);
+    updateHearts(true);
     // generate spawn area synchronously
     const pcx = Math.floor(player.pos.x / CS), pcz = Math.floor(player.pos.z / CS);
     for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) world.ensureChunk(pcx + dx, pcz + dz);
@@ -149,7 +157,7 @@
     if (!world) return false;
     try {
       const p = player.pos;
-      localStorage.setItem(SAVE_KEY, world.serialize({ time: worldTime, hotbar, mobs: mobs.serialize().concat(pendingMobs || []), player: { x: p.x, y: p.y, z: p.z, yaw: player.yaw, pitch: player.pitch, flying: player.flying } }));
+      localStorage.setItem(SAVE_KEY, world.serialize({ time: worldTime, hotbar, mobs: mobs.serialize().concat(pendingMobs || []), spawn: spawnPoint, player: { x: p.x, y: p.y, z: p.z, yaw: player.yaw, pitch: player.pitch, flying: player.flying, hp: player.dead ? player.maxHealth : player.health } }));
       dirtySave = false; saveTimer = 0;
       return true;
     } catch (e) { console.warn('Save failed', e); return false; }
@@ -282,7 +290,8 @@
   function show(id, on) { $(id).classList.toggle('hidden', !on); }
   function setState(s) {
     state = s;
-    show('start', s === 'title'); show('pause', s === 'paused'); show('inventory', s === 'inventory');
+    show('start', s === 'title'); show('pause', s === 'paused'); show('inventory', s === 'inventory'); show('dead', s === 'dead');
+    show('hearts', s !== 'title');
     show('hud', s !== 'title' && settings.showDebug);
     for (const k in player.keys) player.keys[k] = false;
     if (window.game && window.game.onState) window.game.onState(s);
@@ -314,7 +323,11 @@
   $('btn-title').addEventListener('click', () => { saveGame(); setState('title'); });
   $('btn-inv-done').addEventListener('click', play);
   $('btn-inv-close').addEventListener('click', play);
-  { const chk = $('chk-sound'); chk.checked = settings.sound; chk.addEventListener('change', () => { settings.sound = chk.checked; if (mobs) mobs.sound = chk.checked; saveSettings(); if (chk.checked) MobSounds.unlock(); }); }
+  { const chk = $('chk-sound'); chk.checked = settings.sound; chk.addEventListener('change', () => { settings.sound = chk.checked; if (mobs) mobs.sound = chk.checked; if (tnt) tnt.sound = chk.checked; saveSettings(); if (chk.checked) MobSounds.unlock(); }); }
+  { const chk = $('chk-hostile'); chk.checked = settings.hostile !== false; chk.addEventListener('change', () => { setHostile(chk.checked); }); }
+  function setHostile(on) { settings.hostile = !!on; $('chk-hostile').checked = !!on; saveSettings(); if (mobs) mobs.setHostile(!!on); }
+  $('btn-respawn').addEventListener('click', respawn);
+  $('btn-dead-title').addEventListener('click', () => { respawn(true); saveGame(); setState('title'); });
   { const chk = $('chk-debug'); chk.checked = settings.showDebug; chk.addEventListener('change', () => { settings.showDebug = chk.checked; saveSettings(); }); }
   function bindSlider(id, key, fmt, apply) {
     const el = $(id), val = $(id + '-val');
@@ -395,7 +408,7 @@
   window.addEventListener('beforeunload', () => { if (world && state !== 'title') saveGame(); });
 
   // ---------- block interaction ----------
-  let target = null, targetMob = null;
+  let target = null, targetMob = null, lastAttack = 0;
   const MobSounds = VC.MobSounds;
   function isReplaceable(id) { return id === B.AIR || id === B.WATER || VC.Blocks.RENDER[id] === 4; }
   const WALL_TORCH = { '1,0': B.TORCH_PX, '-1,0': B.TORCH_NX, '0,1': B.TORCH_PZ, '0,-1': B.TORCH_NZ };
@@ -407,7 +420,10 @@
       if (world.getBlock(x + dx, y, z + dz) === id) world.setBlock(x + dx, y, z + dz, B.AIR);
   }
   function breakBlock() {
-    if (targetMob) { const msg = mobs.hit(targetMob); if (msg) toast(msg); targetMob = null; dirtySave = true; return; }
+    if (targetMob) {
+      const now = performance.now(); if (now - lastAttack < 380) return; lastAttack = now; // attack cooldown (held buttons repeat)
+      const msg = mobs.hit(targetMob, player.pos); if (msg) toast(msg); targetMob = null; dirtySave = true; return;
+    }
     if (!target || target.id === B.BEDROCK) return;
     world.setBlock(target.x, target.y, target.z, B.AIR);
     removeUnsupported(target.x, target.y, target.z);
@@ -418,8 +434,12 @@
   }
   function placeBlock() {
     if (MobSounds) MobSounds.unlock();
-    if (targetMob) { toast(mobs.interact(targetMob)); dirtySave = true; return; }
+    if (targetMob) { const msg = mobs.interact(targetMob); if (msg) toast(msg); dirtySave = true; return; }
     if (!target) return;
+    if (target.id === B.TNT && !player.keys.ShiftLeft) { // right-click / tap lights TNT (Shift+click places against it)
+      if (tnt.ignite(target.x, target.y, target.z)) { toast('TNT lit — run!'); dirtySave = true; } else toast('Too much TNT already burning');
+      mouse.timer = 0.4; return;
+    }
     let id = hotbar[selected];
     const d = defs[id];
     let x = target.x, y = target.y, z = target.z;
@@ -430,7 +450,7 @@
     if (!isReplaceable(cur)) return;
     if (d.egg) {
       const m = mobs.spawn(d.egg, x + 0.5, y + 0.01, z + 0.5, { yaw: player.yaw + Math.PI });
-      if (!m) toast('Too many animals (max ' + mobs.max + ')'); else { toast((d.egg === 'dog' ? 'Dog' : 'Cat') + ' spawned — right-click / tap it to tame'); dirtySave = true; }
+      if (!m) toast('Too many animals (max ' + mobs.max + ')'); else { toast(mobs.name(m) + ' spawned — ' + (touchOn() ? 'tap' : 'right-click') + ' it to tame'); dirtySave = true; }
       return;
     }
     if (id === B.TORCH) {
@@ -451,6 +471,70 @@
     if (i >= 0) select(i); else { hotbar[selected] = id; buildHotbar(); toast(defs[id].name); }
   }
 
+  // ---------- health, damage, explosions, death ----------
+  const heartImgs = {};
+  function heartCanvas(kind) {
+    if (heartImgs[kind]) return heartImgs[kind];
+    const c = document.createElement('canvas'); c.width = c.height = 9; const g = c.getContext('2d');
+    const rows = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
+    g.fillStyle = '#000'; rows.forEach((r, y) => [...r].forEach((ch, x) => { if (ch === 'X') { g.fillRect(x, y + 1, 3, 3); } }));
+    rows.forEach((r, y) => [...r].forEach((ch, x) => {
+      if (ch !== 'X') return;
+      const full = kind === 'full' || (kind === 'half' && x < 3);
+      g.fillStyle = full ? (y === 1 && x === 1 ? '#ff9a9a' : '#e0202a') : '#3a1414';
+      g.fillRect(x + 1, y + 2, 1, 1);
+    }));
+    return (heartImgs[kind] = c);
+  }
+  let heartsShown = -1;
+  function updateHearts(force) {
+    if (!player) return;
+    const h = player.health;
+    if (!force && h === heartsShown) return;
+    heartsShown = h;
+    const el = $('hearts'); el.innerHTML = '';
+    for (let i = 0; i < player.maxHealth / 2; i++) {
+      const kind = h >= (i + 1) * 2 ? 'full' : h === i * 2 + 1 ? 'half' : 'empty';
+      const c = document.createElement('canvas'); c.width = c.height = 9; c.getContext('2d').drawImage(heartCanvas(kind), 0, 0); el.appendChild(c);
+    }
+    el.classList.toggle('low', h > 0 && h <= 6);
+  }
+  let hurtTimer = 0;
+  function onHurt() {
+    hurtTimer = 0.25; $('hurt-overlay').classList.add('on');
+    if (settings.sound) VC.Sound.play('hurt', 0.6);
+    updateHearts();
+  }
+  function onExplode(c, r) {
+    const R2 = r * 2.2;
+    const pc = player.pos.clone(); pc.y += 0.9;
+    const d = pc.distanceTo(c);
+    player.shake = Math.max(player.shake, Math.max(0, 1 - d / (r * 8)) * 0.9);
+    if (d < R2 && state !== 'title') {
+      const f = 1 - d / R2;
+      player.invuln = 0;
+      if (player.hurt(Math.ceil(f * 18), c, null, 4 + f * 14)) onHurt();
+    }
+    for (const m of [...mobs.list]) {
+      const md = m.pos.distanceTo(c);
+      if (md < R2) { const f = 1 - md / R2; mobs.damage(m, Math.ceil(f * (m.tamed ? 9 : 18)), c, 'tnt'); if (!m.dead) { m.vel.y = 4 + f * 8; } }
+    }
+  }
+  function respawn(silent) {
+    if (!player.dead && silent !== true) { play(); return; }
+    const [x, y, z] = spawnPoint || findSpawn(world.gen);
+    // make sure the spawn column is clear (an explosion or building may have changed it)
+    const bx = Math.floor(x), bz = Math.floor(z);
+    let sy = Math.floor(y);
+    const c = world.getChunk(Math.floor(bx / CS), Math.floor(bz / CS));
+    if (c) { while (sy < CH - 2 && (VC.Blocks.SOLID[world.getBlock(bx, sy, bz)] || VC.Blocks.SOLID[world.getBlock(bx, sy + 1, bz)])) sy++; }
+    player.respawn(x, sy + 0.01, z);
+    for (const m of [...mobs.list]) if (m.hostile && Math.hypot(m.pos.x - x, m.pos.z - z) < 24) mobs.remove(m);
+    updateHearts(true);
+    dirtySave = true;
+    if (silent !== true) play();
+  }
+
   // ---------- HUD ----------
   let fpsFrames = 0, fpsTime = 0, fps = 0, hudTimer = 0;
   function timeString() { const h = (worldTime * 24 + 6) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); }
@@ -466,7 +550,7 @@
       `Chunk: ${Math.floor(p.x / CS)}, ${Math.floor(p.z / CS)}   Facing: ${facing}\n` +
       `Chunks: ${meshed} rendered / ${world.chunks.size} loaded  (RD ${settings.renderDistance})\n` +
       `Time: ${timeString()}   Mode: ${player.flying ? 'flying' : player.inWater ? 'swimming' : 'walking'}\n` +
-      `Target: ${targetMob ? (targetMob.tamed ? 'Tamed ' : '') + targetMob.type : tgt}   Animals: ${mobs.list.length}/${mobs.max}\n` +
+      `Target: ${targetMob ? (targetMob.tamed ? 'Tamed ' : '') + targetMob.type : tgt}   Animals: ${mobs.animals()}/${mobs.max}  Zombies: ${mobs.zombies()}  TNT: ${tnt.count}\n` +
       `Draw calls: ${renderer.info.render.calls}  Tris: ${(renderer.info.render.triangles / 1000).toFixed(0)}k`;
   }
 
@@ -485,7 +569,7 @@
     // target + outline
     target = playing ? player.raycast(6) : null;
     targetMob = null;
-    if (playing && mobs.list.length) {
+    if (playing && mobs.list.length && !player.dead) {
       const dir = new THREE.Vector3(0, 0, -1).applyEuler(camera.rotation);
       const mh = mobs.raycast(camera.position, dir, 5);
       // plants/torches occupy a whole cell for ray picking; let animals standing in them win
@@ -493,11 +577,21 @@
     }
     if (playing) {
       mobs.update(dt, player, currentDaylight);
+      tnt.daylight = currentDaylight; tnt.listener = player.pos;
+      tnt.update(dt);
+      updateHearts();
+      if (player.dead) { // death screen
+        setState('dead'); if (document.pointerLockElement) document.exitPointerLock();
+        $('dead-msg').textContent = (player.lastAttacker && !player.lastAttacker.dead ? 'Slain by a ' + mobs.name(player.lastAttacker).toLowerCase() + '. ' : 'Blown up! ') + 'Your world is safe — respawn at the spawn point.';
+        toast('');
+      }
       if (pendingMobs) { const c = world.getChunk(Math.floor(player.pos.x / CS), Math.floor(player.pos.z / CS)); if (c && c.meshes && !player.frozen) { mobs.load(pendingMobs); pendingMobs = null; } }
     }
     lightUniforms.uTime.value = now / 1000;
     if (target) { selBox.visible = true; selBox.position.set(target.x + 0.5, target.y + 0.5, target.z + 0.5); } else selBox.visible = false;
     if (playing && (mouse.left || mouse.right)) { mouse.timer -= dt; if (mouse.timer <= 0) { mouse.timer = 0.22; if (mouse.left) breakBlock(); else placeBlock(); } }
+    if (state !== 'playing' && tnt && (tnt.count || tnt.particles.length) && state !== 'title') { tnt.update(state === 'dead' ? dt : 0); }
+    if (hurtTimer > 0) { hurtTimer -= dt; if (hurtTimer <= 0) $('hurt-overlay').classList.remove('on'); }
     if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) $('toast').style.opacity = 0; }
     if (dirtySave) { saveTimer += dt; if (saveTimer > 2) saveGame(); }
     hudTimer -= dt; if (hudTimer <= 0 && state !== 'title') { hudTimer = 0.25; updateHud(); }
@@ -520,5 +614,5 @@
   requestAnimationFrame(frame);
 
   // Expose for debugging / automated tests
-  window.game = { perf, get isMobile() { return touchOn(); }, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => { player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; } };
+  window.game = { perf, get isMobile() { return touchOn(); }, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => { player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; }, get tnt() { return tnt; }, setHostile, respawn, onExplode, get spawnPoint() { return spawnPoint; } };
 })();

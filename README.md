@@ -36,3 +36,25 @@ Mobile defaults: render distance 4, pixel ratio 1.
   Animal sounds can be turned off in the pause menu.
 - More blocks: lantern, crafting table, pumpkin, jack o'lantern, 9 more wool colours, mossy cobblestone, hay bale,
   melon, terracotta, blue orchid, pink tulip, red mushroom (flowers can be placed on grass/dirt).
+
+## TNT, lions, zombies & health
+
+![TNT crater](screenshot-tnt.png)
+![Lions fighting a zombie](screenshot-lions.png)
+
+- **TNT** is in the block menu, and new worlds start with it in the hotbar. Place it, then right-click / tap it to light
+  it. It turns into a flashing block that falls and explodes after about 4 seconds. The explosion leaves a ragged
+  crater about 4 blocks across in every direction. Bedrock can't be destroyed. TNT that goes off in water doesn't break
+  any blocks. Nearby TNT is set off in a chain reaction. Explosions hurt and knock back you and the mobs around you,
+  and come with screen shake, a flash, smoke, sparks and a boom. Shift+right-click places a block against TNT without
+  lighting it. The game limits how many explosions it handles at once (lower on mobile) and remeshes the crater in
+  batches.
+- **Lions** sometimes spawn on grass and sand, and the **Lion Spawn Egg** places one. Wild lions are neutral, but they
+  fight back if you hit them. Tame a lion like a dog or cat: right-click / tap it. A tamed lion follows you, and
+  tapping it again makes it sit. A following lion roars and pounces on zombies near you, and on anything that hurts
+  you. Tamed dogs help fight too.
+- **Zombies** spawn at night on dark ground and in dark caves. They won't spawn near torches or other lights (block
+  light 7 or more). They chase you and hit you, and they burn up in daylight. Left-click / long-press to fight back.
+  You can switch **Hostile mobs** off in the pause menu: zombies go away and mobs can't hurt you any more.
+- **Health**: you have 10 hearts. They regenerate slowly after a few seconds without damage. When you die, a respawn
+  screen appears and you come back at the world spawn point. The world is kept.

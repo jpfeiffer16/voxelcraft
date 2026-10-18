@@ -187,15 +187,32 @@ window.VC = window.VC || {};
       if (!c || !c.blockLight) return 0;
       return c.blockLight[idx(x - cx * CS, y, z - cz * CS)];
     }
-    setBlock(x, y, z, id) {
+    // Mark every chunk overlapping [x0..x1]x[z0..z1] (+1 block) dirty; also a ring around it if lights are near.
+    markRegionDirty(x0, z0, x1, z1, urgentX, urgentZ) {
+      const c0x = Math.floor((x0 - 1) / CS), c1x = Math.floor((x1 + 1) / CS), c0z = Math.floor((z0 - 1) / CS), c1z = Math.floor((z1 + 1) / CS);
+      let lit = false;
+      for (let cx = c0x - 1; cx <= c1x + 1 && !lit; cx++) for (let cz = c0z - 1; cz <= c1z + 1; cz++) { const c = this.getChunk(cx, cz); if (c && c.emitters.size) { lit = true; break; } }
+      const g = lit ? 1 : 0;
+      for (let cx = c0x - g; cx <= c1x + g; cx++) for (let cz = c0z - g; cz <= c1z + g; cz++) { const c = this.getChunk(cx, cz); if (c) c.dirty = true; }
+      if (urgentX != null) { const c = this.getChunk(Math.floor(urgentX / CS), Math.floor(urgentZ / CS)); if (c) c.urgent = true; }
+    }
+    setBlock(x, y, z, id, quiet) {
       if (y < 0 || y >= CH) return false;
       const cx = Math.floor(x / CS), cz = Math.floor(z / CS);
       const c = this.chunks.get(cx + ',' + cz);
       if (!c) return false;
       const lx = x - cx * CS, lz = z - cz * CS, i = idx(lx, y, lz);
       const old = c.data[i];
-      c.data[i] = id; c.dirty = true; c.urgent = true;
+      c.data[i] = id; c.dirty = true;
       if (LIGHT[id]) c.emitters.add(i); else c.emitters.delete(i);
+      if (quiet) { // batched edits (explosions): caller marks neighbours via markRegionDirty
+        if (y + 2 > c.maxY) c.maxY = Math.min(CH, y + 2);
+        let e = this.edits.get(c.key); if (!e) { e = new Map(); this.edits.set(c.key, e); }
+        e.set(i, id);
+        if (this.onEdit) this.onEdit(c);
+        return true;
+      }
+      c.urgent = true;
       if (y + 2 > c.maxY) c.maxY = Math.min(CH, y + 2);
       let e = this.edits.get(c.key); if (!e) { e = new Map(); this.edits.set(c.key, e); }
       e.set(i, id);

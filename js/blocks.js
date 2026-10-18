@@ -13,6 +13,7 @@ window.VC = window.VC || {};
     wool_yellow: 43, wool_lime: 44, wool_green: 45, wool_orange: 46, wool_purple: 47, wool_cyan: 48, wool_pink: 49,
     wool_black: 50, wool_gray: 51, mossy_cobble: 52, hay_side: 53, hay_top: 54, melon_side: 55, melon_top: 56,
     flower_blue: 57, mushroom: 58, dog_egg: 59, cat_egg: 60, lantern_top: 61, terracotta: 62, flower_tulip: 63,
+    tnt_side: 64, tnt_top: 65, tnt_bottom: 66, lion_egg: 67,
   };
   const B = {
     AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, WATER: 5, LOG: 6, LEAVES: 7, GLASS: 8, PLANKS: 9,
@@ -22,8 +23,8 @@ window.VC = window.VC || {};
     TORCH: 32, TORCH_PX: 33, TORCH_NX: 34, TORCH_PZ: 35, TORCH_NZ: 36, LANTERN: 37, CRAFTING_TABLE: 38,
     PUMPKIN: 39, JACK_O_LANTERN: 40, WOOL_YELLOW: 41, WOOL_LIME: 42, WOOL_GREEN: 43, WOOL_ORANGE: 44,
     WOOL_PURPLE: 45, WOOL_CYAN: 46, WOOL_PINK: 47, WOOL_BLACK: 48, WOOL_GRAY: 49, MOSSY_COBBLE: 50, HAY: 51,
-    MELON: 52, BLUE_FLOWER: 53, MUSHROOM: 54, TERRACOTTA: 55, TULIP: 56,
-    DOG_EGG: 200, CAT_EGG: 201,
+    MELON: 52, BLUE_FLOWER: 53, MUSHROOM: 54, TERRACOTTA: 55, TULIP: 56, TNT: 57,
+    DOG_EGG: 200, CAT_EGG: 201, LION_EGG: 202,
   };
   const defs = [];
   function def(id, name, tex, opts = {}) {
@@ -92,6 +93,8 @@ window.VC = window.VC || {};
   // Items (never stored in the world)
   def(B.DOG_EGG, 'Dog Spawn Egg', T.dog_egg, { render: 'item', solid: false, egg: 'dog' });
   def(B.CAT_EGG, 'Cat Spawn Egg', T.cat_egg, { render: 'item', solid: false, egg: 'cat' });
+  def(B.LION_EGG, 'Lion Spawn Egg', T.lion_egg, { render: 'item', solid: false, egg: 'lion' });
+  def(B.TNT, 'TNT', { top: T.tnt_top, bottom: T.tnt_bottom, side: T.tnt_side });
 
   const N = 256;
   // Fast lookup tables
@@ -108,7 +111,7 @@ window.VC = window.VC || {};
     TEX[d.id * 3] = d.top; TEX[d.id * 3 + 1] = d.bottom; TEX[d.id * 3 + 2] = d.side;
   }
   VC.T = T; VC.B = B; // Order shown in the block menu
-  const ORDER = [B.TORCH, B.LANTERN, B.DOG_EGG, B.CAT_EGG, B.GLOWSTONE, B.JACK_O_LANTERN, B.PUMPKIN, B.CRAFTING_TABLE, B.BOOKSHELF,
+  const ORDER = [B.TNT, B.TORCH, B.LANTERN, B.DOG_EGG, B.CAT_EGG, B.LION_EGG, B.GLOWSTONE, B.JACK_O_LANTERN, B.PUMPKIN, B.CRAFTING_TABLE, B.BOOKSHELF,
     B.GRASS, B.DIRT, B.STONE, B.COBBLE, B.MOSSY_COBBLE, B.STONE_BRICKS, B.BRICK, B.PLANKS, B.LOG, B.BIRCH_LOG, B.LEAVES, B.BIRCH_LEAVES,
     B.GLASS, B.SAND, B.SANDSTONE, B.GRAVEL, B.SNOW, B.TERRACOTTA, B.HAY, B.MELON, B.CACTUS, B.OBSIDIAN, B.COAL, B.IRON, B.GOLD,
     B.WOOL_WHITE, B.WOOL_GRAY, B.WOOL_BLACK, B.WOOL_RED, B.WOOL_ORANGE, B.WOOL_YELLOW, B.WOOL_LIME, B.WOOL_GREEN, B.WOOL_CYAN,

@@ -196,6 +196,19 @@ window.VC = window.VC || {};
       t.set(5, 4, [255, 255, 255], 200);
     };
   }
+  P[T.tnt_side] = (t) => {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      let c = (x % 4 === 0) ? [170, 40, 30] : [205, 55, 40];
+      if (y >= 5 && y <= 10) c = [235, 235, 230];
+      t.set(x, y, t.vary(c, 6));
+    }
+    const L = { T: ['XXX', '.X.', '.X.', '.X.'], N: ['X.X', 'XXX', 'XXX', 'X.X'] };
+    let ox = 2;
+    for (const ch of 'TNT') { L[ch].forEach((row, yy) => [...row].forEach((v, xx) => { if (v === 'X') t.set(ox + xx, 6 + yy, [20, 20, 20]); })); ox += 4.5; ox = Math.round(ox); }
+  };
+  P[T.tnt_top] = (t) => { t.fill([200, 195, 190], 8); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (x === 0 || y === 0 || x === 15 || y === 15) t.set(x, y, [170, 40, 30]); for (let y = 6; y < 10; y++) for (let x = 6; x < 10; x++) t.set(x, y, [60, 55, 50]); t.set(7, 5, [120, 110, 90]); t.set(8, 4, [120, 110, 90]); };
+  P[T.tnt_bottom] = (t) => { t.fill([185, 180, 175], 8); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (x === 0 || y === 0 || x === 15 || y === 15) t.set(x, y, [170, 40, 30]); };
+  P[T.lion_egg] = egg([215, 170, 90], [120, 70, 25]);
   P[T.dog_egg] = egg([225, 205, 170], [130, 85, 50]);
   P[T.cat_egg] = egg([240, 160, 70], [60, 45, 40]);
 

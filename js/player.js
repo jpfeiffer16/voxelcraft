@@ -18,7 +18,25 @@ window.VC = window.VC || {};
       this.bob = 0;
       this.analog = { x: 0, y: 0 }; this.touchSprint = false;
       this.frozen = true; // until chunk under player is loaded
+      this.maxHealth = 20; this.health = 20; this.dead = false;
+      this.invuln = 0; this.knockT = 0; this.sinceHurt = 99; this.regenT = 0;
+      this.lastAttacker = null; this.lastAttackT = 0; this.shake = 0;
     }
+    // amount in half-hearts; from: Vector3 source for knockback; returns true if damage applied
+    hurt(amount, from, attacker, knock) {
+      if (this.dead || this.invuln > 0 || amount <= 0) return false;
+      this.health = Math.max(0, this.health - amount); this.invuln = 0.5; this.sinceHurt = 0;
+      if (attacker) { this.lastAttacker = attacker; this.lastAttackT = 8; }
+      if (from) {
+        const dx = this.pos.x - from.x, dz = this.pos.z - from.z, d = Math.hypot(dx, dz) || 1, k = knock != null ? knock : 6;
+        this.vel.x = dx / d * k; this.vel.z = dz / d * k; this.vel.y = Math.max(this.vel.y, Math.min(12, 4 + k * 0.3)); this.knockT = 0.35;
+        if (this.flying) this.flying = false;
+      }
+      this.shake = Math.max(this.shake, 0.15 + amount * 0.02);
+      if (this.health <= 0) { this.dead = true; this.vel.set(0, 0, 0); }
+      return true;
+    }
+    respawn(x, y, z) { this.pos.set(x, y, z); this.vel.set(0, 0, 0); this.health = this.maxHealth; this.dead = false; this.invuln = 2; this.lastAttacker = null; this.flying = false; this.frozen = true; }
     isSolidAt(x, y, z) {
       const id = this.world.getBlock(x, y, z);
       return id === -1 ? true : SOLID[id] === 1; // unloaded chunks act solid
@@ -70,6 +88,10 @@ window.VC = window.VC || {};
         const c = w.getChunk(Math.floor(this.pos.x / 16), Math.floor(this.pos.z / 16));
         if (c && c.meshes) this.frozen = false; else { this.updateCamera(0); return; }
       }
+      this.invuln = Math.max(0, this.invuln - dt); this.knockT = Math.max(0, this.knockT - dt); this.lastAttackT = Math.max(0, this.lastAttackT - dt);
+      this.sinceHurt += dt;
+      if (!this.dead && this.health < this.maxHealth && this.sinceHurt > 6) { this.regenT += dt; if (this.regenT >= 3) { this.regenT = 0; this.health++; } } else this.regenT = 0;
+      if (this.dead) { this.updateCamera(0); return; }
       const an = this.analog; // touch joystick (-1..1), y = forward
       const fwd = Math.max(-1, Math.min(1, (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0) + an.y));
       const strafe = Math.max(-1, Math.min(1, (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0) + an.x));
@@ -80,7 +102,7 @@ window.VC = window.VC || {};
       let mx = -sin * fwd + cos * strafe, mz = -cos * fwd - sin * strafe;
       const ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
       const accel = this.onGround || this.flying ? 14 : this.inWater ? 6 : 4;
-      const t = Math.min(1, accel * dt);
+      const t = Math.min(1, accel * dt) * (this.knockT > 0 ? 0.08 : 1); // knockback briefly overrides steering
       this.vel.x += (mx * speed - this.vel.x) * t;
       this.vel.z += (mz * speed - this.vel.z) * t;
 
@@ -114,7 +136,14 @@ window.VC = window.VC || {};
     updateCamera() {
       const bobY = this.flying ? 0 : Math.sin(this.bob * 2) * 0.05, bobX = this.flying ? 0 : Math.cos(this.bob) * 0.03;
       this.camera.position.set(this.pos.x + Math.cos(this.yaw) * bobX, this.pos.y + EYE + bobY, this.pos.z - Math.sin(this.yaw) * bobX);
-      this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+      let sp = 0, sy = 0, sr = 0;
+      if (this.shake > 0.001) {
+        const a = Math.min(0.12, this.shake * 0.12), q = performance.now() / 1000;
+        sp = Math.sin(q * 61) * a; sy = Math.sin(q * 47 + 1) * a; sr = Math.sin(q * 53 + 2) * a * 0.6;
+        this.camera.position.y += Math.sin(q * 71) * a * 0.6;
+        this.shake *= Math.pow(0.02, 1 / 60);
+      } else this.shake = 0;
+      this.camera.rotation.set(this.pitch + sp, this.yaw + sy, this.dead ? 0.6 : sr, 'YXZ');
     }
     // Voxel DDA raycast from the eye. Returns {x,y,z,nx,ny,nz,id} or null.
     raycast(maxDist = 6) {
