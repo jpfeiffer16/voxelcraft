@@ -18,6 +18,7 @@ window.VC = window.VC || {};
     door_iron_bottom: 75, door_iron_top: 76, bed_head_top: 77, bed_foot_top: 78, bed_side: 79, bed_end: 80,
     door_item: 81, iron_door_item: 82, bed_item: 83, bucket: 84, water_bucket: 85, lava_bucket: 86,
     wolf_egg: 87, bear_egg: 88, spider_egg: 89, croc_egg: 90, zombie_egg: 91, water_flow: 92, iron_block: 93,
+    horse_egg: 94, cod_egg: 95, salmon_egg: 96, tropical_egg: 97, puffer_egg: 98,
   };
   const B = {
     AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, WATER: 5, LOG: 6, LEAVES: 7, GLASS: 8, PLANKS: 9,
@@ -36,6 +37,7 @@ window.VC = window.VC || {};
     BED: 112,       // 112..119 = base + facing*2 + head
     DOG_EGG: 200, CAT_EGG: 201, LION_EGG: 202, OAK_DOOR_ITEM: 203, IRON_DOOR_ITEM: 204, BED_ITEM: 205,
     WATER_BUCKET: 206, LAVA_BUCKET: 207, BUCKET: 208, WOLF_EGG: 209, BEAR_EGG: 210, SPIDER_EGG: 211, CROC_EGG: 212, ZOMBIE_EGG: 213,
+    HORSE_EGG: 214, COD_EGG: 215, SALMON_EGG: 216, TROPICAL_EGG: 217, PUFFER_EGG: 218,
   };
   const defs = [];
   function def(id, name, tex, opts = {}) {
@@ -137,6 +139,11 @@ window.VC = window.VC || {};
   def(B.SPIDER_EGG, 'Spider Spawn Egg', T.spider_egg, { render: 'item', solid: false, egg: 'spider' });
   def(B.CROC_EGG, 'Crocodile Spawn Egg', T.croc_egg, { render: 'item', solid: false, egg: 'croc' });
   def(B.ZOMBIE_EGG, 'Zombie Spawn Egg', T.zombie_egg, { render: 'item', solid: false, egg: 'zombie' });
+  def(B.HORSE_EGG, 'Horse Spawn Egg', T.horse_egg, { render: 'item', solid: false, egg: 'horse' });
+  def(B.COD_EGG, 'Cod Spawn Egg', T.cod_egg, { render: 'item', solid: false, egg: 'cod', fishEgg: true });
+  def(B.SALMON_EGG, 'Salmon Spawn Egg', T.salmon_egg, { render: 'item', solid: false, egg: 'salmon', fishEgg: true });
+  def(B.TROPICAL_EGG, 'Tropical Fish Spawn Egg', T.tropical_egg, { render: 'item', solid: false, egg: 'tropical', fishEgg: true });
+  def(B.PUFFER_EGG, 'Pufferfish Spawn Egg', T.puffer_egg, { render: 'item', solid: false, egg: 'puffer', fishEgg: true });
 
   const N = 256;
   // Fast lookup tables
@@ -163,7 +170,7 @@ window.VC = window.VC || {};
   // building / survival items first
   ORDER.splice(1, 0, B.BED_ITEM, B.OAK_DOOR_ITEM, B.IRON_DOOR_ITEM, B.GLASS_PANE, B.OAK_WINDOW, B.STAINED_BLUE, B.STAINED_AMBER,
     B.WATER_BUCKET, B.LAVA_BUCKET, B.BUCKET);
-  ORDER.splice(ORDER.indexOf(B.LION_EGG) + 1, 0, B.WOLF_EGG, B.BEAR_EGG, B.SPIDER_EGG, B.CROC_EGG, B.ZOMBIE_EGG);
+  ORDER.splice(ORDER.indexOf(B.LION_EGG) + 1, 0, B.HORSE_EGG, B.COD_EGG, B.SALMON_EGG, B.TROPICAL_EGG, B.PUFFER_EGG, B.WOLF_EGG, B.BEAR_EGG, B.SPIDER_EGG, B.CROC_EGG, B.ZOMBIE_EGG);
 
   // ---- shapes (units of 1/16) for doors, beds, panes: used for rendering and collision ----
   const DIRS = [[0, 1], [1, 0], [0, -1], [-1, 0]]; // facing f -> [dx, dz]

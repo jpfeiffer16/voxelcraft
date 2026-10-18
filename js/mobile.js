@@ -109,6 +109,7 @@
   hold('tb-place', () => { game.placeBlock(); placeRepeat = true; placeTimer = 0.35; }, () => { placeRepeat = false; });
   const sprintBtn = hold('tb-sprint', () => { const p = player(); p.touchSprint = !p.touchSprint; sprintBtn.classList.toggle('on', p.touchSprint); });
   const flyBtn = hold('tb-fly', () => { game.toggleFly(); });
+  hold('tb-dismount', () => { game.dismount(); });
   hold('tb-menu', () => { game.setState('paused'); });
   hold('tb-recenter', () => recenter(true));
   const tiltBtn = hold('tb-tilt', () => toggleTilt());

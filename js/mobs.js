@@ -47,6 +47,23 @@ window.VC = window.VC || {};
       { name: 'Crocodile', body: 0x4f6e33, dark: 0x3a5226, belly: 0xb9b880 },
       { name: 'Swamp croc', body: 0x5a5e36, dark: 0x3f4324, belly: 0xc2b98a },
     ],
+    horse: [
+      { name: 'Chestnut', body: 0x9a5a2e, mane: 0x5a3018, hoof: 0x3a2a20 },
+      { name: 'Bay', body: 0x7a4a2a, mane: 0x1e1814, hoof: 0x1e1814, lower: 0x1e1814 },
+      { name: 'Black', body: 0x262224, mane: 0x141214, hoof: 0x0e0c0c },
+      { name: 'White', body: 0xe8e4dc, mane: 0xd2ccc0, hoof: 0x8a8070 },
+      { name: 'Dapple gray', body: 0x9a9a9e, mane: 0x4a4a50, hoof: 0x2a2a2e, spots: 0xc8c8cc },
+      { name: 'Palomino', body: 0xd6a24e, mane: 0xf2ead8, hoof: 0x5a4a3a },
+      { name: 'Paint', body: 0xf0ece4, mane: 0x3a2a20, hoof: 0x5a4a3a, spots: 0x7a4a2a },
+    ],
+    cod: [{ name: 'Cod', body: 0xb59c74, dark: 0x8a7454, belly: 0xe2d8c2, fin: 0x9a8260 }],
+    salmon: [{ name: 'Salmon', body: 0xa84a3e, dark: 0x5c6a70, belly: 0xe09a84, fin: 0x7a3a30 }],
+    tropical: [
+      { name: 'Clownfish', body: 0xf07818, stripe: 0xffffff, edge: 0x141414, fin: 0xf07818 },
+      { name: 'Blue tang', body: 0x2a5cd8, stripe: 0x101a44, edge: 0x101a44, fin: 0xf2d020 },
+      { name: 'Yellow tang', body: 0xf2d020, stripe: 0xf8e870, edge: 0xd8b010, fin: 0xf2d020 },
+    ],
+    puffer: [{ name: 'Pufferfish', body: 0xe4c84a, spots: 0x6a5a2a, belly: 0xf4ecc8, spike: 0xf8f0d0, fin: 0x60a0c0 }],
     zombie: [
       { name: 'Zombie', skin: 0x5d9a4a, shirt: 0x2f8a8a, pants: 0x3b3a8f },
       { name: 'Zombie', skin: 0x6a9a50, shirt: 0x7a4a2a, pants: 0x3a3a3a },
@@ -63,6 +80,13 @@ window.VC = window.VC || {};
     bear: { hw: 0.5, h: 1.35, speed: 1.1, run: 4.4, hp: 34, hostile: true, attack: 6, reach: 0.8, cooldown: 1.3, sight: 20 },
     spider: { hw: 0.45, h: 0.6, speed: 1.5, run: 5.0, hp: 14, hostile: true, attack: 2, reach: 0.6, cooldown: 0.7, sight: 24, stalk: true, climbs: true, leaps: true },
     croc: { hw: 0.42, h: 0.5, speed: 0.8, run: 3.0, swim: 5.5, hp: 22, hostile: true, attack: 5, reach: 1.0, cooldown: 1.2, sight: 16, aquatic: true },
+    // rideable: tame-and-mount with right-click / tap; tamed horses stay where you leave them
+    horse: { hw: 0.45, h: 1.55, speed: 1.3, run: 4.5, hp: 24, tame: true, rideable: true, stays: true },
+    // fish: swim inside water only, flop & slowly die on land
+    cod: { hw: 0.14, h: 0.26, speed: 1.0, swim: 1.5, hp: 3, fish: true },
+    salmon: { hw: 0.15, h: 0.28, speed: 1.2, swim: 2.1, hp: 4, fish: true },
+    tropical: { hw: 0.1, h: 0.3, speed: 0.9, swim: 1.3, hp: 3, fish: true },
+    puffer: { hw: 0.15, h: 0.3, speed: 0.6, swim: 0.8, hp: 3, fish: true },
   };
   VC.MOB_TYPES = TYPES;
   const FACE_SHADE = [0.8, 0.8, 1.0, 0.5, 0.7, 0.7];
@@ -206,6 +230,53 @@ window.VC = window.VC || {};
       add(parts.tail, shifted(box(0.4, 0.22, 0.6, C.body), 0, 0, -0.3), 0, 0, 0);
       add(parts.tail, shifted(box(0.22, 0.14, 0.6, C.dark), 0, 0, -0.85), 0, 0, 0);
       parts.legY = 0.22; parts.tailY = 0.3; parts.headY = 0.32; parts.headZ = 0.65; parts.low = true;
+    } else if (type === 'horse') {
+      add(torso, box(0.6, 0.62, 1.3, C.body), 0, 1.12, 0);
+      if (C.spots) { add(torso, box(0.61, 0.3, 0.34, C.spots), 0, 1.2, 0.18); add(torso, box(0.61, 0.24, 0.3, C.spots), 0, 1.0, -0.36); add(torso, box(0.3, 0.2, 0.22, C.spots), 0.16, 1.4, -0.1); }
+      const head = parts.head = new THREE.Group(); head.position.set(0, 1.3, 0.58); root.add(head);
+      const neck = add(head, box(0.3, 0.78, 0.38, C.body), 0, 0.3, 0.06); neck.rotation.x = 0.5;
+      const mane = add(head, box(0.1, 0.82, 0.14, C.mane), 0, 0.34, -0.16); mane.rotation.x = 0.5;
+      add(head, box(0.34, 0.3, 0.62, C.body), 0, 0.66, 0.34);                // head + long snout
+      add(head, box(0.3, 0.2, 0.2, C.lower || C.mane === 0xf2ead8 ? 0x5a4632 : 0x4a3a30), 0, 0.6, 0.62); // muzzle
+      add(head, box(0.04, 0.06, 0.06, 0x101010), 0.175, 0.72, 0.36); add(head, box(0.04, 0.06, 0.06, 0x101010), -0.175, 0.72, 0.36); // eyes
+      add(head, box(0.08, 0.14, 0.06, C.body), 0.11, 0.86, 0.1); add(head, box(0.08, 0.14, 0.06, C.body), -0.11, 0.86, 0.1); // ears
+      add(head, box(0.12, 0.08, 0.2, C.mane), 0, 0.84, 0.2); // forelock
+      for (const [x, z] of [[0.2, 0.5], [-0.2, 0.5], [0.2, -0.5], [-0.2, -0.5]]) {
+        const g = new THREE.Group(); g.position.set(x, 0.82, z); root.add(g);
+        add(g, box(0.18, 0.6, 0.18, C.body, true), 0, 0, 0);
+        add(g, box(0.18, 0.16, 0.18, C.lower || C.body, true), 0, -0.6, 0);
+        add(g, box(0.2, 0.06, 0.2, C.hoof, true), 0, -0.76, 0);
+        parts.legs.push(g);
+      }
+      parts.tail = new THREE.Group(); parts.tail.position.set(0, 1.36, -0.64); root.add(parts.tail);
+      add(parts.tail, box(0.16, 0.7, 0.16, C.mane, true), 0, 0, 0);
+      // saddle (shown when tamed) and the rider's legs (shown while ridden)
+      const saddle = parts.collar = new THREE.Group(); root.add(saddle);
+      add(saddle, box(0.64, 0.06, 0.52, 0x5a3418), 0, 1.45, -0.05); add(saddle, box(0.5, 0.12, 0.1, 0x6e4220), 0, 1.5, 0.18); add(saddle, box(0.66, 0.04, 0.6, 0xa02828), 0, 1.43, -0.05);
+      add(saddle, box(0.04, 0.34, 0.06, 0x2a2a2a), 0.33, 1.26, -0.02); add(saddle, box(0.04, 0.34, 0.06, 0x2a2a2a), -0.33, 1.26, -0.02);
+      const rider = parts.rider = new THREE.Group(); root.add(rider); rider.visible = false;
+      for (const sx of [1, -1]) { add(rider, box(0.18, 0.18, 0.42, 0x3a4aa0), sx * 0.26, 1.56, 0.1); add(rider, box(0.17, 0.5, 0.17, 0x3a4aa0), sx * 0.38, 1.3, 0.24); add(rider, box(0.19, 0.12, 0.26, 0x4a3426), sx * 0.38, 1.02, 0.28); }
+      parts.legY = 0.82; parts.tailY = 1.36; parts.headY = 1.3; parts.headZ = 0.58; parts.horse = true;
+    } else if (TYPES[type] && TYPES[type].fish) {
+      const T = TYPES[type];
+      if (type === 'puffer') {
+        add(torso, box(0.3, 0.26, 0.3, C.body), 0, 0.15, 0); add(torso, box(0.28, 0.06, 0.28, C.belly), 0, 0.03, 0);
+        for (const [x, y, z] of [[0.16, 0.15, 0], [-0.16, 0.15, 0], [0, 0.29, 0], [0, 0.15, 0.16], [0.1, 0.25, -0.1], [-0.1, 0.06, 0.1], [0.1, 0.06, -0.1], [-0.1, 0.25, 0.1]]) add(torso, box(0.04, 0.04, 0.04, C.spike), x, y, z);
+        add(torso, box(0.06, 0.06, 0.06, C.spots), 0.08, 0.22, -0.06); add(torso, box(0.06, 0.06, 0.06, C.spots), -0.07, 0.2, 0.04);
+        add(torso, box(0.05, 0.05, 0.02, 0x101010), 0.09, 0.2, 0.15); add(torso, box(0.05, 0.05, 0.02, 0x101010), -0.09, 0.2, 0.15);
+        parts.tail = new THREE.Group(); parts.tail.position.set(0, 0.15, -0.15); torso.add(parts.tail); add(parts.tail, box(0.02, 0.14, 0.1, C.fin), 0, 0, -0.05);
+      } else {
+        const L = type === 'salmon' ? 0.56 : type === 'cod' ? 0.48 : 0.26, H = type === 'tropical' ? 0.24 : 0.16, Wd = type === 'tropical' ? 0.08 : 0.13;
+        add(torso, box(Wd, H, L, C.body), 0, 0.13, 0);
+        if (C.belly) add(torso, box(Wd - 0.01, 0.05, L * 0.8, C.belly), 0, 0.13 - H / 2 + 0.03, 0.02);
+        if (C.dark) add(torso, box(Wd + 0.005, 0.04, L * 0.9, C.dark), 0, 0.13 + H / 2 - 0.03, 0);
+        if (C.stripe) { add(torso, box(Wd + 0.01, H + 0.005, 0.04, C.stripe), 0, 0.13, L * 0.18); add(torso, box(Wd + 0.01, H * 0.8, 0.035, C.stripe), 0, 0.13, -L * 0.2); }
+        add(torso, box(0.02, type === 'tropical' ? 0.08 : 0.06, L * 0.4, C.fin), 0, 0.13 + H / 2 + 0.03, -0.02);   // dorsal fin
+        add(torso, box(Wd + 0.02, 0.03, 0.03, 0x101010), 0, 0.16, L / 2 - 0.06);                                    // eyes
+        parts.tail = new THREE.Group(); parts.tail.position.set(0, 0.13, -L / 2); torso.add(parts.tail);
+        add(parts.tail, box(0.02, H * 1.1, 0.14, C.fin), 0, 0, -0.07);
+      }
+      parts.collar = new THREE.Object3D(); parts.legY = 0; parts.headY = 0; parts.head = new THREE.Group(); root.add(parts.head); parts.fish = true;
     } else { // zombie (humanoid)
       add(torso, box(0.5, 0.7, 0.26, C.shirt), 0, 1.07, 0);
       const head = parts.head = new THREE.Group(); head.position.set(0, 1.42, 0); root.add(head);
@@ -283,6 +354,16 @@ window.VC = window.VC || {};
       env(ctx, g1, t, 0.1, 0.8, 1.1); n.connect(f); f.connect(g1); g1.connect(out); n.start(t); n.stop(t + 1.15);
       const o = ctx.createOscillator(), g2 = ctx.createGain(); o.type = 'sawtooth'; o.frequency.setValueAtTime(60, t); o.frequency.linearRampToValueAtTime(85, t + 0.3); o.frequency.linearRampToValueAtTime(45, t + 1.0);
       env(ctx, g2, t, 0.1, 0.4, 1.05); o.connect(g2); g2.connect(out); o.start(t); o.stop(t + 1.1);
+    } else if (type === 'horse') { // whinny: vibrato that rises then falls, plus a snort
+      const o = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+      o.type = 'sawtooth'; f.type = 'bandpass'; f.frequency.value = 1100; f.Q.value = 1.2; lfo.frequency.value = 11; lg.gain.value = 40; lfo.connect(lg); lg.connect(o.frequency);
+      o.frequency.setValueAtTime(500, t); o.frequency.linearRampToValueAtTime(950, t + 0.25); o.frequency.linearRampToValueAtTime(420, t + 1.0);
+      env(ctx, g, t, 0.05, 0.35, 1.05); o.connect(f); f.connect(g); g.connect(out); o.start(t); lfo.start(t); o.stop(t + 1.1); lfo.stop(t + 1.1);
+      const n = noise(ctx), nf = ctx.createBiquadFilter(), ng = ctx.createGain(); nf.type = 'lowpass'; nf.frequency.value = 700;
+      env(ctx, ng, t + 1.05, 0.01, 0.4, 0.2); n.connect(nf); nf.connect(ng); ng.connect(out); n.start(t + 1.05); n.stop(t + 1.3);
+    } else if (type === 'splash') {
+      const n = noise(ctx), f = ctx.createBiquadFilter(), g = ctx.createGain(); f.type = 'bandpass'; f.frequency.value = 1600; f.Q.value = 0.7;
+      env(ctx, g, t, 0.005, 0.25, 0.18); n.connect(f); f.connect(g); g.connect(out); n.start(t); n.stop(t + 0.2);
     } else if (type === 'door_open' || type === 'door_close') { // wooden creak / thunk
       const op = type === 'door_open';
       const n = noise(ctx), f = ctx.createBiquadFilter(), g = ctx.createGain();
@@ -333,28 +414,29 @@ window.VC = window.VC || {};
       this.scene = scene; this.world = world;
       this.list = []; this.particles = [];
       this.max = opts.max || 16; this.maxWild = opts.maxWild || 6; this.maxHostile = opts.maxHostile || opts.maxZombies || 12; this.maxWildLions = opts.maxWildLions || 2;
-      this.mobile = !!opts.mobile;
+      this.mobile = !!opts.mobile; this.maxFish = opts.maxFish || (this.mobile ? 6 : 16); this.fishTimer = 2; this.maxWildHorses = this.mobile ? 3 : 5;
       this.spawnTimer = 3; this.hostileTimer = 4; this.sound = true; this.hostile = true;
       this.daylight = 1; this.player = null;
       this.onPlayerDamage = null; // (amount, mob) => void
     }
     get maxZombies() { return this.maxHostile; }
     get count() { return this.list.length; }
-    animals() { let n = 0; for (const m of this.list) if (!m.hostile) n++; return n; }
+    animals() { let n = 0; for (const m of this.list) if (!m.hostile && !m.fish) n++; return n; }
+    fishes() { let n = 0; for (const m of this.list) if (m.fish) n++; return n; }
     hostiles() { let n = 0; for (const m of this.list) if (m.hostile) n++; return n; }
     zombies() { return this.hostiles(); }
     countType(t) { let n = 0; for (const m of this.list) if (m.type === t) n++; return n; }
     dispose() { for (const m of this.list) this.scene.remove(m.model.root); this.list = []; for (const p of this.particles) this.scene.remove(p.s); this.particles = []; }
     spawn(type, x, y, z, o = {}) {
       const T = TYPES[type]; if (!T) return null;
-      if (T.hostile ? this.hostiles() >= this.maxHostile : this.animals() >= this.max) return null;
+      if (T.fish ? this.fishes() >= this.maxFish : T.hostile ? this.hostiles() >= this.maxHostile : this.animals() >= this.max) return null;
       const coats = COATS[type];
       const coatIdx = o.coat != null ? o.coat % coats.length : (Math.random() * coats.length) | 0;
       const model = buildModel(type, coats[coatIdx]);
       const m = Object.assign({ type, coat: coatIdx, model, pos: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), yaw: o.yaw != null ? o.yaw : Math.random() * Math.PI * 2,
         tamed: !!o.tamed, sitting: !!o.sitting, wild: o.wild !== undefined ? o.wild : false, state: 'idle', timer: 1 + Math.random() * 3,
         dir: 0, phase: 0, onGround: false, lightT: 0, soundT: 4 + Math.random() * 20, hpMax: T.hp, cd: 0, attackAnim: 0, hurtT: 0, angry: 0, enemy: null, burnT: 0, dead: false,
-        foe: null, foeT: 0, regenT: 0, lavaT: 0, climbing: false, leapT: 0 }, T);
+        foe: null, foeT: 0, regenT: 0, lavaT: 0, climbing: false, leapT: 0, rider: null, airT: 0, pv: 0, puff: 0, graze: 0 }, T);
       m.hp = o.hp != null ? Math.min(o.hp, T.hp) : T.hp;
       model.parts.collar.visible = m.tamed;
       model.root.position.copy(m.pos);
@@ -414,7 +496,12 @@ window.VC = window.VC || {};
             const s = this.surfaceY(x, z);
             const lions = this.list.filter(m => m.wild && m.type === 'lion').length;
             if (s && (s.id === B.GRASS || s.id === B.SAND) && this.clear2(x, s.y, z)) {
-              if (Math.random() < 0.22 && lions < this.maxWildLions) this.spawn('lion', x + 0.5, s.y, z + 0.5, { wild: true });
+              const horses = this.list.filter(m => m.wild && m.type === 'horse').length;
+              if (s.id === B.GRASS && horses < this.maxWildHorses && Math.random() < 0.35 && this.treesNear(x, s.y, z) === 0) {
+                const coat = (Math.random() * COATS.horse.length) | 0, n = 1 + ((Math.random() * 3) | 0); // a small herd on open plains
+                for (let i = 0; i < n; i++) { const ox = x + (i ? Math.round((Math.random() - 0.5) * 6) : 0), oz = z + (i ? Math.round((Math.random() - 0.5) * 6) : 0), ss = this.surfaceY(ox, oz);
+                  if (ss && ss.id === B.GRASS && this.clear2(ox, ss.y, oz) && this.clear2(ox, ss.y + 1, oz)) this.spawn('horse', ox + 0.5, ss.y, oz + 0.5, { wild: true, coat: Math.random() < 0.6 ? coat : undefined }); }
+              } else if (Math.random() < 0.22 && lions < this.maxWildLions) this.spawn('lion', x + 0.5, s.y, z + 0.5, { wild: true });
               else if (s.id === B.GRASS) {
                 const type = Math.random() < 0.5 ? 'dog' : 'cat', n = Math.random() < 0.5 ? 2 : 1;
                 for (let i = 0; i < n; i++) this.spawn(type, x + 0.5 + i * 0.6, s.y, z + 0.5, { wild: true });
@@ -422,6 +509,30 @@ window.VC = window.VC || {};
             }
           }
         }
+      }
+    }
+    // fish in open water (oceans, lakes) near the player: small schools of one species
+    spawnFish(player) {
+      if (this.fishes() >= this.maxFish) return;
+      const wildFish = this.list.filter(m => m.fish && m.wild).length; if (wildFish >= this.maxFish - 1) return;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const a = Math.random() * Math.PI * 2, r = 8 + Math.random() * 22;
+        const x = Math.floor(player.pos.x + Math.cos(a) * r), z = Math.floor(player.pos.z + Math.sin(a) * r);
+        if (!this.loaded(x, z)) continue;
+        const s = this.surfaceY(x, z); if (!s || FLUID[s.id] !== 1) continue;
+        const y = s.y - 1; // top water cell
+        let depth = 0; while (depth < 6 && FLUID[Math.max(0, this.world.getBlock(x, y - depth, z))] === 1) depth++;
+        if (depth < 2) continue;
+        const roll = Math.random(), sand = this.world.getBlock(x, y - depth, z) === B.SAND;
+        const type = roll < 0.35 ? 'cod' : roll < 0.6 ? 'salmon' : roll < (sand ? 0.9 : 0.85) ? 'tropical' : 'puffer';
+        const n = type === 'puffer' ? 1 : 1 + ((Math.random() * 3) | 0), coat = (Math.random() * COATS[type].length) | 0;
+        for (let i = 0; i < n; i++) {
+          const fy = y - Math.min(depth - 1, 1 + ((Math.random() * (depth - 1)) | 0)) + 0.3;
+          const fx = x + 0.5 + (Math.random() - 0.5) * 1.6, fz = z + 0.5 + (Math.random() - 0.5) * 1.6;
+          if (this.fluidAt(fx, fy + 0.15, fz) !== 1) continue;
+          this.spawn(type, fx, fy, fz, { wild: true, coat });
+        }
+        return;
       }
     }
     treesNear(x, y, z) { let n = 0; for (let dz = -5; dz <= 5; dz += 2) for (let dx = -5; dx <= 5; dx += 2) for (let dy = 2; dy <= 8; dy += 2) { const id = this.world.getBlock(x + dx, y + dy, z + dz); if (id === B.LEAVES || id === B.BIRCH_LEAVES) { n++; break; } } return n; }
@@ -485,15 +596,22 @@ window.VC = window.VC || {};
       if (this.spawnTimer <= 0) { this.spawnTimer = 4 + Math.random() * 4; this.spawnNatural(player); }
       this.hostileTimer -= dt;
       if (this.hostileTimer <= 0) { this.hostileTimer = daylight < 0.4 ? 1.5 + Math.random() * 2 : 3 + Math.random() * 4; this.spawnHostile(player); }
+      this.fishTimer -= dt;
+      if (this.fishTimer <= 0) { this.fishTimer = 2.5 + Math.random() * 3; this.spawnFish(player); }
       for (let i = this.list.length - 1; i >= 0; i--) {
         const m = this.list[i]; if (!m) continue;
         const dx = player.pos.x - m.pos.x, dz = player.pos.z - m.pos.z, dist = Math.hypot(dx, dz);
-        if (m.wild && !m.tamed && dist > (m.hostile ? 64 : 96)) { this.remove(m); continue; }
+        if (m.rider) { // ridden horse: carried by the player's physics
+          if (m.rider.mount !== m || m.rider.dead) { m.rider = null; m.model.parts.rider.visible = false; }
+          else { this.ridden(m, dt, m.rider); continue; }
+        }
+        if (m.wild && !m.tamed && dist > (m.hostile ? 64 : m.fish ? 48 : 96)) { this.remove(m); continue; }
         if (!this.loaded(m.pos.x, m.pos.z)) {
-          if (m.tamed && !m.sitting && this.loaded(player.pos.x, player.pos.z)) this.teleportNear(m, player);
+          if (m.tamed && !m.sitting && !m.stays && this.loaded(player.pos.x, player.pos.z)) this.teleportNear(m, player);
           m.model.root.visible = false; continue;
         }
         m.model.root.visible = true;
+        if (m.fish) { this.fishUpdate(m, dt, player); continue; }
         m.cd -= dt; m.attackAnim = Math.max(0, m.attackAnim - dt); m.hurtT = Math.max(0, m.hurtT - dt); if (m.angry > 0) m.angry -= dt;
         if (m.foeT > 0) { m.foeT -= dt; if (m.foeT <= 0 || (m.foe && m.foe.dead)) m.foe = null; }
         this.think(m, dt, player, dx, dz, dist);
@@ -511,6 +629,87 @@ window.VC = window.VC || {};
         m.soundT -= dt;
         if (m.soundT <= 0) { m.soundT = (m.hostile ? 6 : 15) + Math.random() * 30; if (this.sound && dist < 16 && m.type !== 'lion') playSound(m.type, (1 - dist / 16) * 0.6); }
       }
+      this.updateParticles(dt);
+    }
+    // ---- horses ----
+    mount(m, player) {
+      if (!m.rideable || m.dead) return false;
+      for (const o of this.list) if (o.rider === player) o.rider = null;
+      m.rider = player; m.tamed = true; m.wild = false; m.sitting = false; m.state = 'idle'; m.vel.set(0, 0, 0);
+      m.model.parts.collar.visible = true; m.model.parts.rider.visible = true;
+      if (this.sound) playSound('horse', 0.6);
+      return true;
+    }
+    ridden(m, dt, player) {
+      m.model.root.visible = true;
+      m.pos.copy(player.pos); m.vel.copy(player.vel); m.onGround = player.onGround; m.inWater = player.inWater;
+      // the horse turns its body toward where the rider looks (smoothly)
+      let dy = player.yaw + Math.PI - m.yaw; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
+      m.yaw += dy * Math.min(1, dt * 7); m.lookYaw = 0; m.state = 'ridden';
+      if (m.hurtT > 0) m.hurtT = Math.max(0, m.hurtT - dt);
+      this.animate(m, dt);
+      if (m.inWater) m.model.root.position.y -= 0.35; // swims low in the water
+    }
+    // ---- fish ----
+    fishUpdate(m, dt, player) {
+      const W = this.world, cy = m.pos.y + m.h * 0.5;
+      const wet = (x, y, z) => this.fluidAt(x, y, z) === 1;
+      m.inWater = wet(m.pos.x, cy, m.pos.z);
+      m.hurtT = Math.max(0, m.hurtT - dt);
+      const pd = Math.hypot(player.pos.x - m.pos.x, player.pos.y + 0.9 - cy, player.pos.z - m.pos.z);
+      if (m.inWater) {
+        m.airT = 0; m.timer -= dt;
+        let speed = m.cruise != null ? m.cruise : m.speed;
+        if (m.timer <= 0) { m.timer = 1.5 + Math.random() * 3.5; m.dir = Math.random() * Math.PI * 2; m.pv = (Math.random() - 0.5) * 0.7; m.cruise = m.swim * (0.25 + Math.random() * 0.55); if (Math.random() < 0.25) m.cruise = 0.15; speed = m.cruise; }
+        if (pd < 3.2 && !player.dead) {
+          if (m.type === 'puffer') m.puff = Math.min(1, m.puff + dt * 3);
+          else { m.dir = Math.atan2(m.pos.x - player.pos.x, m.pos.z - player.pos.z) + (Math.random() - 0.5) * 0.6; speed = m.swim * 1.6; m.timer = 0.6; }
+        } else if (m.puff > 0) m.puff = Math.max(0, m.puff - dt * 0.5);
+        // stay inside the water: look ahead, turn back at walls / the surface / the floor
+        const ax = m.pos.x + Math.sin(m.dir) * (m.hw + 0.35), az = m.pos.z + Math.cos(m.dir) * (m.hw + 0.35);
+        if (!wet(ax, cy, az) || this.solid(ax, cy, az)) { m.dir += Math.PI * (0.6 + Math.random() * 0.8); speed *= 0.3; }
+        if (m.pv > 0 && !wet(m.pos.x, cy + 0.45, m.pos.z)) m.pv = -Math.abs(m.pv) * 0.5;
+        if (m.pv < 0 && !wet(m.pos.x, cy - 0.45, m.pos.z)) m.pv = Math.abs(m.pv) * 0.5;
+        let d = m.dir - m.yaw; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+        m.yaw += d * Math.min(1, dt * 4);
+        const k = Math.min(1, dt * 3);
+        m.vel.x += (Math.sin(m.yaw) * speed - m.vel.x) * k; m.vel.z += (Math.cos(m.yaw) * speed - m.vel.z) * k; m.vel.y += (m.pv * speed - m.vel.y) * k;
+        // move axis by axis, refusing any step that would leave the water
+        for (const ax3 of [0, 2, 1]) {
+          const v = m.vel.getComponent(ax3) * dt; if (!v) continue;
+          const before = m.pos.getComponent(ax3); m.pos.setComponent(ax3, before + v);
+          if (!wet(m.pos.x, m.pos.y + m.h * 0.5, m.pos.z) || this.collides(m, m.pos.x, m.pos.y, m.pos.z)) { m.pos.setComponent(ax3, before); m.vel.setComponent(ax3, 0); if (ax3 === 1) m.pv = -m.pv; }
+        }
+        m.onGround = false;
+      } else {
+        // out of water: flop around and slowly suffocate
+        m.airT += dt; m.puff = Math.max(0, m.puff - dt);
+        m.vel.y = Math.max(m.vel.y - 28 * dt, -30);
+        if (m.onGround) { m.vel.x *= Math.pow(0.02, dt); m.vel.z *= Math.pow(0.02, dt); m.timer -= dt; if (m.timer <= 0) { m.timer = 0.5 + Math.random() * 0.9; m.vel.y = 3 + Math.random() * 1.5; const a = Math.random() * Math.PI * 2; m.vel.x = Math.sin(a) * 1.3; m.vel.z = Math.cos(a) * 1.3; m.yaw += (Math.random() - 0.5) * 2; } }
+        if (this.moveAxis(m, 0, m.vel.x * dt)) m.vel.x = 0;
+        if (this.moveAxis(m, 2, m.vel.z * dt)) m.vel.z = 0;
+        const vy = m.vel.y * dt, hit = this.moveAxis(m, 1, vy); m.onGround = hit && vy < 0; if (hit) m.vel.y = 0;
+        if (m.airT > 5) { m.lavaT -= dt; if (m.lavaT <= 0) { m.lavaT = 5; this.damage(m, 1, null, 'air'); if (m.dead) return; } }
+        if (this.fluidAt(m.pos.x, m.pos.y + 0.1, m.pos.z) === 2) { this.damage(m, 10, null, 'lava'); return; }
+        if (m.pos.y < -10) { this.remove(m); return; }
+      }
+      this.fishAnimate(m, dt);
+    }
+    fishAnimate(m, dt) {
+      const P = m.model.parts, root = m.model.root, t = performance.now() / 1000;
+      const hs = Math.hypot(m.vel.x, m.vel.z);
+      m.phase += dt * (m.inWater ? 6 + hs * 9 : 22);
+      if (P.tail) P.tail.rotation.y = Math.sin(m.phase) * (m.inWater ? 0.35 + Math.min(0.4, hs * 0.2) : 0.7);
+      P.torso.rotation.y = Math.sin(m.phase + 1) * (m.inWater ? 0.06 : 0.15);
+      const s = 1 + m.puff * 0.9; P.torso.scale.setScalar(s);
+      root.position.copy(m.pos);
+      const pitch = m.inWater ? -Math.atan2(m.vel.y, Math.max(0.2, hs)) * 0.7 : 0;
+      root.rotation.set(pitch, m.yaw, m.inWater ? 0 : Math.PI / 2 * 0.95, 'YXZ');
+      if (!m.inWater) root.position.y += 0.08;
+      else root.position.y += Math.sin(t * 1.7 + m.coat * 2) * 0.02;
+      this.shade(m, dt);
+    }
+    updateParticles(dt) {
       for (let i = this.particles.length - 1; i >= 0; i--) {
         const p = this.particles[i]; p.t += dt;
         if (p.t < 0) continue;
@@ -580,6 +779,10 @@ window.VC = window.VC || {};
       } else {
         m.engaged = false;
         if (m.sitting) { m.state = 'sit'; }
+        else if (m.tamed && m.stays) { // tamed horses wait where you left them, grazing now and then
+          m.state = 'idle';
+          if (m.timer <= 0) { m.timer = 2 + Math.random() * 5; m.graze = Math.random() < 0.5 ? 2 + Math.random() * 3 : 0; }
+        }
         else if (m.tamed && dist > 3) {
           m.state = 'follow';
           if (dist > 24 && player.onGround) { this.teleportNear(m, player); return; }
@@ -589,7 +792,7 @@ window.VC = window.VC || {};
           speed = m.speed;
           if (m.timer <= 0) { m.state = 'idle'; m.timer = 1.5 + Math.random() * 4; }
         } else {
-          if (m.state !== 'idle') { m.state = 'idle'; m.timer = 1 + Math.random() * 3; }
+          if (m.state !== 'idle') { m.state = 'idle'; m.timer = 1 + Math.random() * 3; if (m.rideable) m.graze = Math.random() < 0.6 ? 1.5 + Math.random() * 3 : 0; }
           if (m.timer <= 0) {
             m.state = 'walk'; m.timer = 1.5 + Math.random() * 3.5;
             m.dir = m.tamed ? Math.atan2(dx, dz) + (Math.random() - 0.5) * 2 : Math.random() * Math.PI * 2;
@@ -640,7 +843,7 @@ window.VC = window.VC || {};
     animate(m, dt) {
       const P = m.model.parts, root = m.model.root;
       const hs = Math.hypot(m.vel.x, m.vel.z);
-      m.phase += dt * hs * ({ cat: 9, lion: 5.5, zombie: 4, bear: 4, croc: 5, spider: 9, wolf: 7 }[m.type] || 7.5);
+      m.phase += dt * hs * ({ cat: 9, lion: 5.5, zombie: 4, bear: 4, croc: 5, spider: 9, wolf: 7, horse: 1.9 }[m.type] || 7.5);
       const sw = Math.min(1, hs / 1.5) * 0.7;
       const sit = m.sitting, atk = m.attackAnim > 0 ? Math.sin((1 - m.attackAnim / 0.35) * Math.PI) : 0;
       const t = performance.now() / 1000;
@@ -648,6 +851,16 @@ window.VC = window.VC || {};
         P.legs.forEach((l, i) => { l.rotation.x = Math.sin(m.phase + i * Math.PI) * sw; });
         P.arms.forEach((a, i) => { a.rotation.x = -Math.PI / 2 + 0.1 + Math.sin(t * 2 + i) * 0.05 + atk * 0.9; });
         P.torso.rotation.x = atk * 0.15;
+      } else if (P.horse) {
+        // walk: diagonal pairs; gallop (fast): front pair then back pair
+        const gallop = hs > 6.5, amp = Math.min(1, hs / 2) * (gallop ? 0.95 : 0.55);
+        const off = gallop ? [0, 0.6, Math.PI, Math.PI + 0.6] : [0, Math.PI, Math.PI, 0];
+        P.legs.forEach((l, i) => { l.rotation.x = Math.sin(m.phase + off[i]) * amp; });
+        P.torso.rotation.x = gallop ? Math.sin(m.phase) * 0.07 : 0;
+        P.torso.position.y = gallop ? Math.abs(Math.sin(m.phase)) * 0.06 : 0;
+        P.tail.rotation.x = 0.3 + Math.min(0.9, hs * 0.1) + Math.sin(t * 2.1 + m.coat) * 0.05; P.tail.rotation.z = Math.sin(t * 1.4 + m.coat) * 0.18;
+        if (m.graze > 0) m.graze -= dt;
+        if (P.rider) P.rider.visible = !!m.rider;
       } else if (P.spider) {
         P.legs.forEach((g, i) => { const u = g.userData, ph = m.phase + (u.k % 2 ? Math.PI : 0) + (u.side > 0 ? 0 : Math.PI);
           g.rotation.y = u.baseY + Math.sin(ph) * 0.35 * Math.min(1, hs);
@@ -669,10 +882,14 @@ window.VC = window.VC || {};
       }
       P.head.rotation.y += ((m.lookYaw || 0) - P.head.rotation.y) * Math.min(1, dt * 6);
       P.head.rotation.x = m.type === 'zombie' || m.type === 'croc' ? 0 : -atk * 0.4;
+      if (P.horse) { const gz = m.rider ? 0.35 : m.graze > 0 && hs < 0.3 ? 1.25 : 0, hs2 = Math.min(1, hs / 8); m.headX = (m.headX || 0) + (gz - hs2 * 0.25 + Math.sin(m.phase * 2) * 0.05 * hs2 - (m.headX || 0)) * Math.min(1, dt * 4); P.head.rotation.x = m.headX; }
       P.head.position.y = P.headY + (sit ? 0.04 : 0) + (m.state === 'idle' ? Math.sin(t * 2 + m.coat) * 0.01 : 0) - (m.type === 'wolf' && m.state === 'chase' ? 0.08 : 0);
       P.head.position.z = (P.headZ || 0) + atk * 0.15;
       root.position.copy(m.pos); root.rotation.y = m.yaw;
       if (m.inWater && m.aquatic) root.position.y -= 0.3; // crocodiles float low in the water
+      this.shade(m, dt);
+    }
+    shade(m, dt) {
       m.lightT -= dt;
       if (m.lightT <= 0) {
         m.lightT = 0.25;
@@ -703,7 +920,7 @@ window.VC = window.VC || {};
     raycast(origin, dir, maxDist) {
       let best = null;
       for (const m of this.list) {
-        if (!m.model.root.visible) continue;
+        if (!m.model.root.visible || m.rider) continue;
         const mn = [m.pos.x - m.hw - 0.05, m.pos.y, m.pos.z - m.hw - 0.05], mx = [m.pos.x + m.hw + 0.05, m.pos.y + m.h, m.pos.z + m.hw + 0.05];
         let t0 = 0, t1 = maxDist, ok = true;
         for (let a = 0; a < 3 && ok; a++) {
@@ -725,10 +942,12 @@ window.VC = window.VC || {};
         this.scene.add(s); this.particles.push({ s, t: -i * 0.12, life, vy });
       }
     }
-    name(m) { return { dog: 'Dog', cat: 'Cat', lion: 'Lion', zombie: 'Zombie', wolf: 'Wolf', bear: 'Bear', spider: 'Spider', croc: 'Crocodile' }[m.type]; }
+    name(m) { if (m.fish && m.type === 'tropical') return COATS.tropical[m.coat].name; return { dog: 'Dog', cat: 'Cat', lion: 'Lion', zombie: 'Zombie', wolf: 'Wolf', bear: 'Bear', spider: 'Spider', croc: 'Crocodile', horse: 'Horse', cod: 'Cod', salmon: 'Salmon', tropical: 'Tropical fish', puffer: 'Pufferfish' }[m.type]; }
     // right-click / tap: tame, then toggle sit <-> follow
     interact(m) {
       if (m.hostile) return null;
+      if (m.fish) { if (this.sound) playSound('splash', 0.4); return (m.type === 'puffer' ? 'A pufferfish — careful, it puffs up!' : 'A ' + this.name(m).toLowerCase() + '.') + (m.inWater ? '' : ' It needs water!'); }
+      if (m.rideable) { if (!m.tamed) { m.tamed = true; m.wild = false; m.model.parts.collar.visible = true; if (this.sound) playSound('horse', 0.6); this.particle(heartTex, new THREE.Vector3(m.pos.x, m.pos.y + m.h, m.pos.z), 3, 0.5, 0.8, 1.2); return 'Horse tamed! It will wait where you leave it.'; } return 'Your horse — right-click / tap (without Shift) to ride.'; }
       if (m.angry > 0 && !m.tamed) return 'The lion is angry — let it calm down first!';
       let msg;
       if (!m.tamed) { m.tamed = true; m.wild = false; m.sitting = false; m.model.parts.collar.visible = true; msg = this.name(m) + ' tamed! It will follow you' + (m.protect ? ' and protect you.' : '.'); }
@@ -740,13 +959,14 @@ window.VC = window.VC || {};
     }
     // left-click / long-press: hit hostiles & wild lions, pet tamed animals, shoo wild dogs/cats
     hit(m, fromPos) {
-      if (m.hostile || (m.type === 'lion' && !m.tamed)) { this.damage(m, 5, fromPos, 'player'); return null; }
+      if (m.hostile || m.fish || (m.type === 'lion' && !m.tamed)) { this.damage(m, 5, fromPos, 'player'); return null; }
+      if (m.rideable && !m.tamed) { this.particle(puffTex, new THREE.Vector3(m.pos.x, m.pos.y + 1.2, m.pos.z), 3, 0.5, 0.6, 0.6); m.dir = Math.atan2(m.pos.x - fromPos.x, m.pos.z - fromPos.z); m.state = 'walk'; m.timer = 2.5; m.speed = TYPES.horse.run; setTimeout(() => { m.speed = TYPES.horse.speed; }, 2500); if (this.sound) playSound('horse', 0.5); return null; } // wild horses bolt
       if (m.tamed) { this.particle(heartTex, new THREE.Vector3(m.pos.x, m.pos.y + m.h, m.pos.z), 2, 0.4, 0.8, 1); if (this.sound) playSound(m.type, 0.5); return null; }
       this.particle(puffTex, new THREE.Vector3(m.pos.x, m.pos.y + 0.3, m.pos.z), 6, 0.6, 0.6, 0.7);
       this.remove(m);
       return 'Shooed away';
     }
-    serialize() { return this.list.filter(m => !m.hostile && (m.tamed || !m.wild)).map(m => ({ t: m.type, c: m.coat, x: +m.pos.x.toFixed(2), y: +m.pos.y.toFixed(2), z: +m.pos.z.toFixed(2), r: +m.yaw.toFixed(2), tm: m.tamed ? 1 : 0, s: m.sitting ? 1 : 0, hp: m.hp })); }
+    serialize() { return this.list.filter(m => !m.hostile && (m.tamed || !m.wild) && !(m.fish && !m.inWater)).map(m => ({ t: m.type, c: m.coat, x: +m.pos.x.toFixed(2), y: +m.pos.y.toFixed(2), z: +m.pos.z.toFixed(2), r: +m.yaw.toFixed(2), tm: m.tamed ? 1 : 0, s: m.sitting ? 1 : 0, hp: m.hp })); }
     load(arr) { for (const o of arr || []) if (COATS[o.t] && !TYPES[o.t].hostile) this.spawn(o.t, o.x, o.y, o.z, { coat: o.c, yaw: o.r, tamed: !!o.tm, sitting: !!o.s, wild: false, hp: o.hp }); }
   }
 

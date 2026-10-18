@@ -96,9 +96,36 @@ Mobile defaults: render distance 4, pixel ratio 1.
   - Deep caves now have lava lakes at the bottom.
   - The flowing is calculated in small batches, a few times a second (fewer blocks per update on mobile), so it never
     stalls the game.
-- **New-world hotbar**: grass, planks, cobblestone, oak door, glass pane, bed, torch, TNT and lion egg. Everything else is
+- **New-world hotbar**: grass, planks, cobblestone, oak door, glass pane, bed, torch, TNT and lion egg (now horse egg, see below). Everything else is
   in the block menu (**E**, or **⋯** on touch). **Shift + right-click** places a block against a door or bed instead of
   using it.
+
+## Horses & fish
+
+![Riding a saddled horse past a wild herd](screenshot-horses.png)
+![A saddled horse and a herd in the plains](screenshot-horses-side.png)
+![Cod, salmon, clownfish, tangs and a puffed-up pufferfish in a pool](screenshot-fish.png)
+
+- **Horses** live in herds of 1–3 on open grassland (plains without trees). They come in 7 coats: chestnut, bay, black,
+  white, dapple gray, palomino and paint. Each one has a mane, a tail and a walking / galloping gait, and it grazes now and
+  then. The **Horse Spawn Egg** (last hotbar slot in new worlds) puts one down wherever you like.
+  - **Right-click / tap a horse** to tame it (a saddle appears) and climb on. **Shift + right-click** tames it without
+    getting on.
+  - While riding, the camera is at rider height and you can see the rider's legs. **WASD** or the **joystick** steers.
+    Riding speed is about 6 blocks/s, or about 10.5 when you gallop (**Ctrl**, or **»** on touch). **Space** / **▲**
+    jumps about 2.5 blocks, and the horse steps up 1 block on its own.
+  - Horses swim slowly, paddle up with Space, and won't walk into lava.
+  - **Shift** (or the **⏏** button on touch, which only shows while riding) gets you off beside the horse. A tamed horse
+    stays where you left it and is saved with the world.
+  - Hostile mobs still attack you while you ride. If you hit a wild horse, it bolts.
+- **Fish**: **cod**, **salmon**, **tropical fish** (clownfish, blue tang, yellow tang) and **pufferfish**, each with an
+  animated swimming model.
+  - Schools spawn naturally in water deep enough (2+ blocks) and despawn when far away. At most 16 fish are around at
+    once (6 on mobile).
+  - Each type has a **spawn egg**. Use it on water (it also works looking through glass, so you can stock an aquarium).
+    Fish released this way are kept with the world.
+  - Fish only swim inside water and dart away when you get close. A pufferfish puffs up instead.
+  - Out of water a fish flops around and slowly dies.
 
 ### Tilt look troubleshooting
 

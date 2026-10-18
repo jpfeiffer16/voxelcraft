@@ -137,3 +137,7 @@ html.mobile #hearts canvas { width: 15px; height: 15px; }
 @keyframes burnflick { from { filter: brightness(1); } to { filter: brightness(1.35); } }
 #sleep-overlay { position: fixed; inset: 0; pointer-events: none; background: #000; opacity: 0; transition: opacity .7s; }
 #sleep-overlay.on { opacity: 0.94; }
+
+#tb-dismount { right: 8px; bottom: 86px; display: none; font-size: 22px; background: rgba(160,100,40,0.6); }
+body.riding #tb-dismount { display: block; }
+body.riding #tb-down { display: none !important; }

@@ -83,7 +83,7 @@
   let world = null, player = null;
   let state = 'title'; // title | playing | paused | inventory | dead
   let worldTime = 0.05;
-  let hotbar = [B.GRASS, B.PLANKS, B.COBBLE, B.OAK_DOOR_ITEM, B.GLASS_PANE, B.BED_ITEM, B.TORCH, B.TNT, B.LION_EGG];
+  let hotbar = [B.GRASS, B.PLANKS, B.COBBLE, B.OAK_DOOR_ITEM, B.GLASS_PANE, B.BED_ITEM, B.TORCH, B.TNT, B.HORSE_EGG];
   let mobs = null, tnt = null, fluids = null, spawnPoint = null;
   let selected = 0;
   let saveTimer = 0, dirtySave = false;
@@ -122,7 +122,7 @@
     pendingMobs = null;
     world = new VC.World(seed);
     if (mobs) mobs.dispose();
-    mobs = new VC.Mobs(scene, world, { max: MOBILE ? 10 : 20, maxWild: MOBILE ? 4 : 6, maxHostile: MOBILE ? 7 : 16, maxWildLions: MOBILE ? 1 : 2, mobile: MOBILE });
+    mobs = new VC.Mobs(scene, world, { max: MOBILE ? 10 : 20, maxWild: MOBILE ? 4 : 6, maxHostile: MOBILE ? 7 : 16, maxFish: MOBILE ? 6 : 16, maxWildLions: MOBILE ? 1 : 2, mobile: MOBILE });
     fluids = new VC.Fluids(world, { maxPerTick: MOBILE ? 48 : 96 });
     mobs.sound = settings.sound; mobs.hostile = settings.hostile !== false;
     mobs.onPlayerDamage = (amt, m) => { if (!settings.hostile) return; player.lastCause = 'mob'; if (player.hurt(amt, m.pos, m, 5)) onHurt(); };
@@ -400,10 +400,11 @@
     if (state !== 'playing') return;
     if (['Space', 'ArrowUp', 'ArrowDown', 'Tab'].includes(e.code) || (e.ctrlKey && e.code !== 'ControlLeft' && e.code !== 'ControlRight')) e.preventDefault();
     if (e.code.startsWith('Digit')) { const n = +e.code.slice(5); if (n >= 1 && n <= 9) select(n - 1); }
-    if (e.code === 'KeyF' && !e.repeat) { player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); }
-    if (e.code === 'Space' && !e.repeat) {
+    if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat && player.mount) { dismount(); }
+    if (e.code === 'KeyF' && !e.repeat) { toggleFlyToast(); }
+    if (e.code === 'Space' && !e.repeat && !player.mount) {
       const now = performance.now();
-      if (now - player.lastSpace < 300) { player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); player.lastSpace = 0; }
+      if (now - player.lastSpace < 300) { toggleFlyToast(); player.lastSpace = 0; }
       else player.lastSpace = now;
     }
     player.keys[e.code] = true;
@@ -496,9 +497,50 @@
     // nearby water / lava flows into the hole by itself (fluid simulation)
     target = null;
   }
+  function toggleFlyToast() { if (player.mount) { toast('You are riding — dismount first (' + (touchOn() ? '⏏ button' : 'Shift') + ')'); return; } player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); }
+  function mountHorse(m) {
+    if (player.mount || player.dead) return false;
+    if (player.flying) player.flying = false;
+    const wasWild = !m.tamed;
+    if (!mobs.mount(m, player)) return false;
+    if (!player.mountHorse(m)) { m.rider = null; toast('No room to ride here'); return false; }
+    toast((wasWild ? 'Horse tamed! ' : '') + (touchOn() ? 'Steer with the joystick, » to gallop, ▲ to jump, ⏏ to get off' : 'WASD to ride, Ctrl to gallop, Space to jump, Shift to get off'));
+    dirtySave = true; updateRideUi(); return true;
+  }
+  function dismount() {
+    if (!player.mount) return false;
+    const ok = player.dismount();
+    if (!ok) toast('No room to get off here'); else { toast('The horse will wait here for you'); dirtySave = true; }
+    updateRideUi(); return ok;
+  }
+  function updateRideUi() { document.body.classList.toggle('riding', !!player.mount); }
+  // fish eggs: spawn into the water you are looking at (the block ray passes through water)
+  function waterCellAhead() {
+    const o = camera.position, dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    for (let t = 0.5; t < 7; t += 0.2) {
+      const x = Math.floor(o.x + dir.x * t), y = Math.floor(o.y + dir.y * t), z = Math.floor(o.z + dir.z * t), id = world.getBlock(x, y, z);
+      if (id > 0 && BL.FLUID[id] === 1) return [x, y, z];
+      if (id > 0 && BL.SOLID[id] && BL.OPAQUE[id]) break; // see through glass / panes (aquariums)
+    }
+    return null;
+  }
+  function placeFish(d) {
+    let c = null;
+    if (target) { const x = target.x + target.nx, y = target.y + target.ny, z = target.z + target.nz, id = world.getBlock(x, y, z); if (id > 0 && BL.FLUID[id] === 1) c = [x, y, z]; }
+    if (!c) c = waterCellAhead();
+    if (!c) { toast('Fish need water — aim at a lake or the sea'); return; }
+    // drop the fish into the middle of that water column
+    let [x, y, z] = c; const below = world.getBlock(x, y - 1, z); if (below > 0 && BL.FLUID[below] === 1) y -= 1;
+    const m = mobs.spawn(d.egg, x + 0.5, y + 0.3, z + 0.5, { yaw: player.yaw + Math.PI, wild: false });
+    if (!m) toast('Too many fish (max ' + mobs.maxFish + ')'); else { toast(mobs.name(m) + ' released'); if (settings.sound) VC.Sound.play('splash', 0.5); dirtySave = true; }
+  }
   function placeBlock() {
     if (MobSounds) MobSounds.unlock();
-    if (targetMob) { const msg = mobs.interact(targetMob); if (msg) toast(msg); dirtySave = true; return; }
+    if (targetMob) {
+      if (targetMob.rideable && !player.mount && !player.keys.ShiftLeft) { mountHorse(targetMob); return; }
+      const msg = mobs.interact(targetMob); if (msg) toast(msg); dirtySave = true; return;
+    }
+    { const hd = defs[hotbar[selected]]; if (hd && hd.fishEgg) { placeFish(hd); return; } }
     if (!target) return;
     const held = defs[hotbar[selected]];
     if (held && held.places === 'bucket') { const k = scoopFluid(); toast(k === 1 ? 'Scooped up water' : k === 2 ? 'Scooped up lava' : 'Aim at a water or lava source'); return; }
@@ -619,6 +661,7 @@
     let sy = Math.floor(y);
     const c = world.getChunk(Math.floor(bx / CS), Math.floor(bz / CS));
     if (c) { while (sy < CH - 2 && (VC.Blocks.SOLID[world.getBlock(bx, sy, bz)] || VC.Blocks.SOLID[world.getBlock(bx, sy + 1, bz)])) sy++; }
+    if (player.mount) { player.dismount(true); updateRideUi(); }
     player.respawn(x, sy + 0.01, z); player.burnT = 0; player.lastCause = null;
     for (const m of [...mobs.list]) if (m.hostile && Math.hypot(m.pos.x - x, m.pos.z - z) < 24) mobs.remove(m);
     updateHearts(true);
@@ -640,7 +683,7 @@
       `XYZ: ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}\n` +
       `Chunk: ${Math.floor(p.x / CS)}, ${Math.floor(p.z / CS)}   Facing: ${facing}\n` +
       `Chunks: ${meshed} rendered / ${world.chunks.size} loaded  (RD ${settings.renderDistance})\n` +
-      `Time: ${timeString()}   Mode: ${player.flying ? 'flying' : player.inWater ? 'swimming' : 'walking'}\n` +
+      `Time: ${timeString()}   Mode: ${player.mount ? 'riding' : player.flying ? 'flying' : player.inWater ? 'swimming' : 'walking'}   Fish: ${mobs.fishes()}/${mobs.maxFish}\n` +
       `Target: ${targetMob ? (targetMob.tamed ? 'Tamed ' : '') + targetMob.type : tgt}   Animals: ${mobs.animals()}/${mobs.max}  Hostile: ${mobs.hostiles()}/${mobs.maxHostile}  TNT: ${tnt.count}  Fluid queue: ${fluids.pending}\n` +
       `Draw calls: ${renderer.info.render.calls}  Tris: ${(renderer.info.render.triangles / 1000).toFixed(0)}k`;
   }
@@ -683,6 +726,7 @@
       $('lava-overlay').style.display = player.headInLava ? 'block' : 'none';
       if (sleeping > 0 && performance.now() >= sleeping) { sleeping = 0; finishSleep(); }
       updateHearts();
+      if (!!player.mount !== document.body.classList.contains('riding')) updateRideUi();
       if (player.dead) { // death screen
         setState('dead'); if (document.pointerLockElement) document.exitPointerLock();
         const la = player.lastAttacker, cause = player.lastCause;
@@ -718,5 +762,5 @@
   requestAnimationFrame(frame);
 
   // Expose for debugging / automated tests
-  window.game = { perf, get isMobile() { return touchOn(); }, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => { player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; }, get tnt() { return tnt; }, get fluids() { return fluids; }, useBed, toggleDoor, scoopFluid, get worldTime() { return worldTime; }, get sleeping() { return sleeping; }, setHostile, respawn, onExplode, get spawnPoint() { return spawnPoint; } };
+  window.game = { perf, get isMobile() { return touchOn(); }, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => toggleFlyToast(), mountHorse, dismount, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; }, get tnt() { return tnt; }, get fluids() { return fluids; }, useBed, toggleDoor, scoopFluid, get worldTime() { return worldTime; }, get sleeping() { return sleeping; }, setHostile, respawn, onExplode, get spawnPoint() { return spawnPoint; } };
 })();
