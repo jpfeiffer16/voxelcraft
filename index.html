@@ -24,7 +24,7 @@
   <div id="joy-zone"></div>
   <div id="joy-base"><div id="joy-knob"></div></div>
   <div id="tb-top">
-    <button class="tbtn small" id="tb-tilt" title="Tilt look">📱</button>
+    <button class="tbtn small tilt-only" id="tb-tilt" title="Tilt look">📱</button>
     <button class="tbtn small" id="tb-recenter" title="Recenter view">◎</button>
     <button class="tbtn small" id="tb-menu" title="Menu">☰</button>
   </div>
@@ -49,12 +49,14 @@
       <button id="btn-new">New World</button>
     </div>
     <div id="world-info"></div>
-    <div class="row mobile-only"><button id="btn-tilt-start" class="tilt-btn">Enable tilt look</button></div>
+    <div class="touch-toggle"><span class="tt-label">Touch controls:</span><div class="seg touch-seg"><button data-mode="auto">Auto</button><button data-mode="on">On</button><button data-mode="off">Off</button></div></div>
+    <div class="touch-note"></div>
+    <div class="row mobile-only tilt-only"><button id="btn-tilt-start" class="tilt-btn">Enable tilt look</button></div>
     <div class="controls mobile-only">
       <div><b>Left thumb</b> drag to move</div><div><b>Right side</b> drag to look</div>
       <div><b>Tap</b> place block / tame pet</div><div><b>Hold</b> break block</div>
       <div><b>▲</b> jump / swim / fly up</div><div><b>✈</b> fly · <b>»</b> sprint</div>
-      <div><b>Tilt phone</b> to aim (📱 toggle)</div><div><b>◎</b> recenter · <b>☰</b> menu</div>
+      <div class="tilt-only"><b>Tilt phone</b> to aim (📱 toggle)</div><div><b>◎</b> recenter · <b>☰</b> menu</div>
       <div><b>Hotbar</b> tap to select</div><div><b>⋯</b> torches, pets, blocks</div>
     </div>
     <div class="controls desktop-only">
@@ -63,7 +65,7 @@
       <div><b>F</b> or <b>double-tap Space</b> fly</div><div><b>Ctrl</b> fast fly</div>
       <div><b>Left click</b> break</div><div><b>Right click</b> place</div>
       <div><b>Right click pet</b> tame / sit / follow</div><div><b>1–9 / wheel</b> hotbar</div>
-      <div><b>E</b> block menu (torches, pets…)</div><div><b>F3</b> debug info</div>
+      <div><b>E</b> block menu (torches, pets…)</div><div><b>F3</b> debug · <b>T</b> touch controls</div>
       <div><b>Esc</b> pause / settings</div><div><b>Middle click</b> pick block</div>
     </div>
   </div>
@@ -73,10 +75,12 @@
   <div class="panel">
     <h2>Paused</h2>
     <button id="btn-resume" class="big">Resume</button>
+    <div class="touch-toggle"><span class="tt-label">Touch controls:</span><div class="seg touch-seg"><button data-mode="auto">Auto</button><button data-mode="on">On</button><button data-mode="off">Off</button></div></div>
+    <div class="touch-note"></div>
     <label>Render distance: <span id="rd-val"></span> chunks<input id="rd" type="range" min="3" max="16" step="1"></label>
     <div class="mobile-only">
-      <div class="row"><button id="btn-tilt-pause" class="tilt-btn">Enable tilt look</button><button id="btn-recenter">Recenter</button></div>
-      <label>Tilt sensitivity: <span id="tiltSens-val"></span><input id="tiltSens" type="range" min="2" max="25" step="1"></label>
+      <div class="row"><button id="btn-tilt-pause" class="tilt-btn tilt-only">Enable tilt look</button><button id="btn-recenter">Recenter view</button></div>
+      <label class="tilt-only">Tilt sensitivity: <span id="tiltSens-val"></span><input id="tiltSens" type="range" min="2" max="25" step="1"></label>
       <label>Touch look sensitivity: <span id="lookSens-val"></span><input id="lookSens" type="range" min="2" max="25" step="1"></label>
     </div>
     <label class="desktop-only">Mouse sensitivity: <span id="sens-val"></span><input id="sens" type="range" min="1" max="20" step="1"></label>

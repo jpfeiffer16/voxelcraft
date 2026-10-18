@@ -104,3 +104,12 @@ html.mobile .inv-item canvas { width: 46px; height: 46px; }
 .inv-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; position: sticky; top: -26px; background: rgba(25,25,30,0.97); z-index: 1; padding: 4px 0; }
 .inv-head h2 { margin: 0; }
 html.mobile .inv-head { top: -16px; }
+/* touch controls toggle */
+.touch-toggle { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 12px 0 2px; font-size: 14px; }
+.tt-label { color: #ddd; font-weight: 600; }
+.seg { display: inline-flex; border: 2px solid #222; border-radius: 4px; overflow: hidden; }
+.seg button { box-shadow: none; border: 0; border-right: 1px solid #333; padding: 6px 14px; background: #4a4a50; }
+.seg button:last-child { border-right: 0; }
+.seg button.active { background: #4f8a3a; box-shadow: inset 0 -3px 0 #2f5a20; }
+.touch-note { color: #9ab; font-size: 12px; min-height: 16px; margin-bottom: 4px; }
+html.no-tilt .tilt-only { display: none !important; }

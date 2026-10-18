@@ -4,7 +4,8 @@
   const { CS, CH, SEA, SAVE_KEY } = VC.CONST;
   const B = VC.B, defs = VC.Blocks.defs;
   const $ = (id) => document.getElementById(id);
-  const MOBILE = !!VC.isMobile;
+  const MOBILE = !!VC.isMobile; // mode at load (settings storage key, initial defaults)
+  const touchOn = () => !!VC.isMobile; // current touch-controls mode (can change at runtime)
   const SETTINGS_KEY = MOBILE ? 'voxelcraft.settings.mobile.v1' : 'voxelcraft.settings.v1';
   const DAY_LENGTH = 600; // seconds per full day
 
@@ -19,7 +20,8 @@
   THREE.ColorManagement.enabled = false;
   const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MOBILE ? 1 : 1.5));
+  const applyPixelRatio = () => renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, touchOn() ? 1 : 1.5));
+  applyPixelRatio();
   renderer.setSize(window.innerWidth, window.innerHeight);
   $('game').appendChild(renderer.domElement);
   const scene = new THREE.Scene();
@@ -86,7 +88,7 @@
   let selected = 0;
   let saveTimer = 0, dirtySave = false;
   const testMode = /[?&]test=1/.test(location.search);
-  const noLock = testMode || MOBILE; // touch devices never use pointer lock
+  const noLock = () => testMode || touchOn(); // touch mode never requires pointer lock
 
   function hashSeed(s) { s = String(s).trim(); if (/^-?\d+$/.test(s)) return parseInt(s, 10) | 0; let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h | 0; }
 
@@ -256,7 +258,7 @@
       s.addEventListener('click', (e) => { e.stopPropagation(); if (state === 'playing') select(i); });
       hb.appendChild(s);
     });
-    if (MOBILE) { const m = document.createElement('div'); m.className = 'slot menu-slot'; m.textContent = '⋯'; m.addEventListener('click', (e) => { e.stopPropagation(); if (state === 'playing') setState('inventory'); }); hb.appendChild(m); }
+    if (touchOn()) { const m = document.createElement('div'); m.className = 'slot menu-slot'; m.textContent = '⋯'; m.addEventListener('click', (e) => { e.stopPropagation(); if (state === 'playing') setState('inventory'); }); hb.appendChild(m); }
   }
   let toastTimer = 0;
   function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.opacity = 1; toastTimer = 1.6; }
@@ -287,15 +289,15 @@
     if (s === 'paused') { saveGame(); $('save-status').textContent = 'World saved automatically.'; }
   }
   function play() {
-    if (noLock) {
-      if (MOBILE && !testMode && !document.fullscreenElement && document.documentElement.requestFullscreen) { try { const p = document.documentElement.requestFullscreen({ navigationUI: 'hide' }); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+    if (noLock()) {
+      if (touchOn() && VC.autoMobile && !testMode && !document.fullscreenElement && document.documentElement.requestFullscreen) { try { const p = document.documentElement.requestFullscreen({ navigationUI: 'hide' }); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
       setState('playing'); return;
     }
     lockPointer(); setState('playing');
   }
   document.addEventListener('pointerlockchange', () => {
     if (document.pointerLockElement === canvas) { if (state !== 'playing') setState('playing'); }
-    else if (state === 'playing') setState('paused');
+    else if (state === 'playing' && !noLock()) setState('paused'); // in touch mode, releasing the mouse doesn't pause
   });
 
   $('btn-play').addEventListener('click', play);
@@ -319,13 +321,39 @@
     el.value = settings[key]; val.textContent = fmt(settings[key]);
     el.addEventListener('input', () => { settings[key] = +el.value; val.textContent = fmt(settings[key]); if (apply) apply(); saveSettings(); });
   }
-  bindSlider('rd', 'renderDistance', (v) => v);
+  bindSlider('rd', 'renderDistance', (v) => v, () => { settings.rdCustom = true; });
   bindSlider('sens', 'sensitivity', (v) => v);
   bindSlider('fov', 'fov', (v) => v + '°', () => { camera.fov = settings.fov; camera.updateProjectionMatrix(); });
 
+  // ---------- touch controls mode toggle (Auto / On / Off) ----------
+  function touchLabel() {
+    const tm = VC.touchMode, o = tm.urlOverride;
+    return o !== null ? 'URL override (?mobile=' + (o ? 1 : 0) + ')' : tm.pref === 'auto' ? 'Auto: ' + (VC.autoMobile ? 'touch device detected' : 'no touch device detected') : '';
+  }
+  function updateTouchToggle() {
+    for (const seg of document.querySelectorAll('.touch-seg')) {
+      for (const b of seg.querySelectorAll('button')) b.classList.toggle('active', VC.touchMode.urlOverride === null && b.dataset.mode === VC.touchMode.pref);
+    }
+    for (const n of document.querySelectorAll('.touch-note')) n.textContent = touchLabel() + (touchLabel() ? ' · ' : '') + 'Touch controls are ' + (touchOn() ? 'ON' : 'OFF') + ' · press T to toggle';
+    $('btn-play').textContent = $('btn-play').textContent.replace(/^(Click|Tap)/, touchOn() ? 'Tap' : 'Click');
+  }
+  for (const seg of document.querySelectorAll('.touch-seg')) for (const b of seg.querySelectorAll('button'))
+    b.addEventListener('click', (e) => { e.stopPropagation(); VC.touchMode.set(b.dataset.mode); });
+  window.addEventListener('vc-touchmode', () => {
+    applyPixelRatio();
+    if (!settings.rdCustom) { settings.renderDistance = touchOn() ? 4 : 8; $('rd').value = settings.renderDistance; $('rd-val').textContent = settings.renderDistance; saveSettings(); }
+    buildHotbar();
+    if (touchOn()) { if (document.pointerLockElement) document.exitPointerLock(); }
+    else if (state === 'playing' && !testMode && document.pointerLockElement !== canvas) setState('paused'); // desktop mode needs a click to capture the mouse
+    if (window.game && window.game.onState) window.game.onState(state);
+    updateTouchToggle();
+    toast('Touch controls ' + (touchOn() ? 'on' : 'off'));
+  });
+  updateTouchToggle();
+
   // ---------- input ----------
   document.addEventListener('mousemove', (e) => {
-    if (state !== 'playing' || (!noLock && document.pointerLockElement !== canvas)) return;
+    if (state !== 'playing' || (!testMode && document.pointerLockElement !== canvas)) return;
     const s = settings.sensitivity * 0.00025;
     player.yaw -= e.movementX * s; player.pitch -= e.movementY * s;
     player.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, player.pitch));
@@ -333,7 +361,7 @@
   const mouse = { left: false, right: false, timer: 0 };
   canvas.addEventListener('mousedown', (e) => {
     if (state !== 'playing') return;
-    if (!noLock && document.pointerLockElement !== canvas) { lockPointer(); return; }
+    if (!testMode && document.pointerLockElement !== canvas) { lockPointer(); return; } // a mouse click captures the mouse (also in touch mode)
     if (e.button === 0) { mouse.left = true; mouse.timer = 0.25; breakBlock(); }
     else if (e.button === 2) { mouse.right = true; mouse.timer = 0.25; placeBlock(); }
     else if (e.button === 1) { e.preventDefault(); pickBlock(); }
@@ -344,6 +372,7 @@
   document.addEventListener('keydown', (e) => {
     if (e.target && e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
     if (e.code === 'F3') { e.preventDefault(); settings.showDebug = !settings.showDebug; saveSettings(); show('hud', state !== 'title' && settings.showDebug); return; }
+    if (e.code === 'KeyT' && !e.repeat && !e.ctrlKey && !e.metaKey) { VC.touchMode.toggle(); return; }
     if (e.code === 'KeyE') {
       if (state === 'playing') { setState('inventory'); if (document.pointerLockElement) document.exitPointerLock(); }
       else if (state === 'inventory') play();
@@ -486,9 +515,10 @@
   if (existing && typeof existing.seed === 'number') { createWorld(existing.seed, existing); $('btn-play').textContent = 'Click to Play (continue world)'; }
   else { createWorld((Math.random() * 2147483647) | 0, null); }
   setState('title');
+  updateTouchToggle();
   if (testMode) play();
   requestAnimationFrame(frame);
 
   // Expose for debugging / automated tests
-  window.game = { perf, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, isMobile: MOBILE, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => { player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; } };
+  window.game = { perf, get isMobile() { return touchOn(); }, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => { player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; } };
 })();

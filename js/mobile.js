@@ -2,23 +2,24 @@
 (function () {
   'use strict';
   const game = window.game;
-  if (!game || !game.isMobile) return;
+  if (!game) return;
+  const active = () => !!VC.isMobile; // touch controls can be switched on/off at runtime
   const $ = (id) => document.getElementById(id);
   const settings = game.settings;
   const ui = $('touch-ui'), joyBase = $('joy-base'), joyKnob = $('joy-knob');
   const canvas = game.renderer.domElement;
 
   // Block browser gestures (pinch zoom, double-tap zoom, pull-to-refresh, scrolling)
-  const stop = (e) => e.preventDefault();
+  const stop = (e) => { if (active()) e.preventDefault(); };
   document.addEventListener('gesturestart', stop, { passive: false });
   document.addEventListener('gesturechange', stop, { passive: false });
   document.addEventListener('dblclick', stop, { passive: false });
-  document.addEventListener('touchmove', (e) => { if (e.cancelable && !(e.target.closest && e.target.closest('.overlay'))) e.preventDefault(); }, { passive: false });
+  document.addEventListener('touchmove', (e) => { if (active() && e.cancelable && !(e.target.closest && e.target.closest('.overlay'))) e.preventDefault(); }, { passive: false });
 
-  { const b = $('btn-play'); b.textContent = b.textContent.replace('Click', 'Tap'); }
 
+  window.addEventListener('vc-touchmode', () => { releaseAll(); updateTiltUI(); if (active() && tiltPermission === 'granted') startListening(); });
   game.onState = (s) => {
-    ui.classList.toggle('hidden', s !== 'playing');
+    ui.classList.toggle('hidden', s !== 'playing' || !active());
     if (s !== 'playing') { releaseAll(); }
   };
 
@@ -47,6 +48,7 @@
 
   let holdBreak = false, breakTimer = 0;
   canvas.addEventListener('touchstart', (e) => {
+    if (!active()) return;
     if (e.cancelable) e.preventDefault();
     if (game.state !== 'playing') return;
     for (const t of e.changedTouches) {
@@ -60,6 +62,7 @@
     }
   }, { passive: false });
   canvas.addEventListener('touchmove', (e) => {
+    if (!active()) return;
     if (e.cancelable) e.preventDefault();
     for (const t of e.changedTouches) {
       if (joy && t.identifier === joy.id) { setJoy(t.clientX - joy.ox, t.clientY - joy.oy); continue; }
@@ -73,6 +76,7 @@
     }
   }, { passive: false });
   const endTouch = (e) => {
+    if (!active()) return;
     if (e.cancelable) e.preventDefault();
     for (const t of e.changedTouches) {
       if (joy && t.identifier === joy.id) { joy = null; joyHome(); player().analog.x = 0; player().analog.y = 0; continue; }
@@ -115,16 +119,20 @@
   let tiltPermission = typeof DeviceOrientationEvent === 'undefined' ? 'unsupported'
     : typeof DeviceOrientationEvent.requestPermission === 'function' ? 'prompt' : 'granted';
   let tiltSeen = false, prev = null, pendYaw = 0, pendPitch = 0;
+  // Show tilt UI only where DeviceOrientation looks usable: iOS-style permission API, or a touch device.
+  function setTiltAvailable(on) { document.documentElement.classList.toggle('no-tilt', !on); }
+  setTiltAvailable(tiltPermission !== 'unsupported' && (navigator.maxTouchPoints > 0 || VC.autoMobile));
   function screenAngle() { return ((screen.orientation && screen.orientation.angle) || window.orientation || 0) * Math.PI / 180; }
   function onOrient(ev) {
-    if (ev.alpha == null && ev.beta == null) return;
+    if (ev.alpha == null && ev.beta == null) { if (!tiltSeen) setTiltAvailable(false); return; } // e.g. desktop Chrome: API exists, no sensor
+    setTiltAvailable(true);
     tiltSeen = true; updateTiltUI();
     const D = Math.PI / 180;
     eDev.set((ev.beta || 0) * D, (ev.alpha || 0) * D, -(ev.gamma || 0) * D, 'YXZ');
     qDev.setFromEuler(eDev).multiply(q1).multiply(qTmp.setFromAxisAngle(zee, -screenAngle()));
     eOut.setFromQuaternion(qDev, 'YXZ');
     const cur = { yaw: eOut.y, pitch: eOut.x };
-    if (prev && settings.tilt && game.state === 'playing') {
+    if (prev && settings.tilt && active() && game.state === 'playing') {
       let dy = cur.yaw - prev.yaw; if (dy > Math.PI) dy -= 2 * Math.PI; if (dy < -Math.PI) dy += 2 * Math.PI;
       const dp = cur.pitch - prev.pitch;
       const k = settings.tiltSens / 10;
@@ -169,7 +177,7 @@
   for (const id of ['btn-tilt-start', 'btn-tilt-pause']) $(id).addEventListener('click', (e) => { e.stopPropagation(); if (tiltPermission === 'prompt') requestTilt(); else toggleTilt(); });
   $('btn-recenter').addEventListener('click', () => recenter(true));
   // iOS: ask for motion permission on the same tap that starts the game
-  $('btn-play').addEventListener('click', () => { if (tiltPermission === 'prompt' && settings.tilt) requestTilt(); recenter(false); }, true);
+  $('btn-play').addEventListener('click', () => { if (active() && tiltPermission === 'prompt' && settings.tilt) requestTilt(); recenter(false); }, true);
   $('btn-resume').addEventListener('click', () => recenter(false), true);
   if (tiltPermission === 'granted') startListening();
   updateTiltUI();
@@ -188,7 +196,7 @@
   function tick(now) {
     requestAnimationFrame(tick);
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    if (game.state !== 'playing') { pendYaw = pendPitch = 0; return; }
+    if (game.state !== 'playing' || !active()) { pendYaw = pendPitch = 0; return; }
     const p = player();
     // smooth tilt deltas (exponential)
     const a = 1 - Math.exp(-dt * 16);
@@ -215,4 +223,8 @@
 })();
 // sync with the state main.js may already be in (e.g. ?test=1 auto-start)
 if (window.game && window.game.onState) window.game.onState(window.game.state);
-{ const s = document.querySelector('#inventory .sub'); if (s && window.game && window.game.isMobile) s.textContent = 'Tap a block, torch or spawn egg to put it in the selected hotbar slot.'; }
+(function () {
+  const s = document.querySelector('#inventory .sub'); if (!s) return;
+  const upd = () => { s.textContent = VC.isMobile ? 'Tap a block, torch or spawn egg to put it in the selected hotbar slot.' : 'Click a block to put it in the selected hotbar slot. Press E to close.'; };
+  upd(); window.addEventListener('vc-touchmode', upd);
+})();

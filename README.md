@@ -12,7 +12,10 @@ Three.js r160 (MIT) is vendored in `vendor/`.
 
 ## Mobile / touch
 
-On phones and tablets (auto-detected; force with `?mobile=1` / `?mobile=0`) the game shows touch controls:
+On phones and tablets the game shows touch controls. Choose **Touch controls: Auto / On / Off** on the start screen or in the pause menu,
+or press **T**. Your choice is saved, and switching takes effect right away. `?mobile=1` / `?mobile=0` overrides it until you change the toggle.
+With touch controls on and a mouse attached, clicking the game captures the mouse for looking and clicking, and Esc releases it without pausing.
+Touch controls:
 left-thumb joystick to move, drag on the right to look, tap to place, long-press to break,
 buttons for jump/fly-up, fly-down, fly toggle, sprint, break, place, a pause menu, a tilt-look toggle and a recenter button.
 Tap a hotbar slot to select it; `⋯` opens the block menu.
