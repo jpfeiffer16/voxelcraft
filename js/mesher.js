@@ -6,7 +6,7 @@ window.VC = window.VC || {};
 (function () {
   'use strict';
   const { CS, CH } = VC.CONST;
-  const { OPAQUE, RENDER, TEX, LIGHT, defs } = VC.Blocks;
+  const { OPAQUE, RENDER, TEX, LIGHT, FLUID, LEVEL, defs } = VC.Blocks;
   const B = VC.B;
   const PW = CS + 2, PH = CH + 2, PLANE = PW * PW;
   const pad = new Uint8Array(PW * PW * PH);
@@ -201,15 +201,27 @@ window.VC = window.VC || {};
             continue;
           }
           if (r === 5) { modelBlock(cutout, id, wx, y, wz, p, sky); continue; }
-          const buf = r === 1 ? opaque : r === 2 ? cutout : water;
+          const buf = r === 1 || r === 7 ? opaque : r === 2 ? cutout : water;
           const glow = LIGHT[id] >= 10;
-          const waterTop = r === 3 && pad[p + PLANE] !== B.WATER;
+          const fl = FLUID[id];
+          // fluid surface height: full when the same fluid is above, else by level (8 = source)
+          const fluidH = (q) => FLUID[pad[q + PLANE]] === fl ? 1 : (LEVEL[pad[q]] >= 8 ? 0.88 : Math.max(0.14, LEVEL[pad[q]] / 8 * 0.86));
+          const fluidTop = fl ? fluidH(p) : 1;
           for (let f = 0; f < 6; f++) {
             const F = FACES[f];
             const nid = pad[p + F.nOff];
             if (OPAQUE[nid]) continue;
             if (r === 2 && nid === id) continue;
-            if (r === 3) { if (nid === B.WATER) continue; if (RENDER[nid] === 2 && f !== 2) continue; }
+            let sideFloor = 0; // a side face against lower fluid of the same kind only covers the step
+            if (fl) {
+              if (FLUID[nid] === fl) {
+                if (f === 2) { if (fluidTop === 1) continue; }
+                else if (f === 3) continue;
+                else { const nh = fluidH(p + F.nOff); if (nh >= fluidTop - 0.001) continue; sideFloor = nh; }
+              }
+              if (r === 3 && RENDER[nid] === 2 && f !== 2) continue;
+            }
+            if (r === 6 && nid === id) continue;
             if (r === 1 && nid === 0 && y === 0 && f === 3) continue;
             const tile = TEX[id * 3 + F.t], uv = uvOf(tile);
             const aos = [0, 0, 0, 0];
@@ -219,7 +231,7 @@ window.VC = window.VC || {};
               const c = F.c[k], A = F.ao[k];
               let S, G;
               if (glow) { S = 1; G = 1; }
-              else if (r === 3) { S = F.shade * sky(pn) * 0.95 + 0.05; G = F.shade * BL[blockLightP(pn)]; }
+              else if (r === 3 || r === 6) { S = F.shade * sky(pn) * 0.95 + 0.05; G = F.shade * BL[blockLightP(pn)]; }
               else {
                 const o1 = OPAQUE[pad[p + A[0]]], o2 = OPAQUE[pad[p + A[1]]], o3 = OPAQUE[pad[p + A[2]]];
                 const ao = (o1 && o2) ? 0 : 3 - o1 - o2 - o3;
@@ -233,7 +245,8 @@ window.VC = window.VC || {};
                 S = ss * k2; G = bs * k2;
               }
               let vy = y + c[1];
-              if (waterTop && c[1] === 1) vy -= 0.12;
+              if (fluidTop < 1 && c[1] === 1) vy = y + fluidTop;
+              else if (sideFloor && c[1] === 0) vy = y + sideFloor;
               const uc = UVC[k];
               buf.vert(wx + c[0], vy, wz + c[2], uc[0] ? uv[2] : uv[0], uc[1] ? uv[3] : uv[1], S, G);
             }
@@ -247,12 +260,16 @@ window.VC = window.VC || {};
   }
 
   // Small textured boxes (torches, lanterns). UVs crop the tile by the box position, like Minecraft.
+  const nbOff = (dx, dz) => dx + dz * PW;
   function modelBlock(buf, id, wx, y, wz, p, sky) {
-    const boxes = MODELS[id]; if (!boxes) return;
     const d = defs[id], wall = d.wall;
+    let boxes = MODELS[id], specs = null;
+    if (d.shape) { specs = VC.Blocks.shape(id, (dx, dz) => pad[p + nbOff(dx, dz)]); boxes = specs.map(s => s.b); }
+    if (!boxes) return;
     const emit = LIGHT[id] > 0;
     const S0 = emit ? 1 : sky(p), G0 = emit ? 1 : BL[blockLightP(p)];
-    for (const bx of boxes) {
+    for (let bi = 0; bi < boxes.length; bi++) {
+      const bx = boxes[bi], spec = specs && specs[bi];
       const mn = [bx[0] / 16, bx[1] / 16, bx[2] / 16], mx = [bx[3] / 16, bx[4] / 16, bx[5] / 16];
       for (let f = 0; f < 6; f++) {
         const F = FACES[f];
@@ -263,7 +280,10 @@ window.VC = window.VC || {};
           let lx = c[0] ? mx[0] : mn[0], ly = c[1] ? mx[1] : mn[1], lz = c[2] ? mx[2] : mn[2];
           // tile-space coords for UV (x/z horizontally, y vertically)
           let u, v;
-          if (F.na === 0) { u = lz; v = ly; } else if (F.na === 2) { u = lx; v = ly; } else { u = lx; v = 1 - lz; }
+          if (F.na === 0) { u = lz; v = ly; } else if (F.na === 2) { u = lx; v = ly; } else {
+            u = lx; v = 1 - lz;
+            if (spec && spec.rotTop != null) for (let r = (spec.rotTop + 2) % 4; r > 0; r--) { const t = u; u = v; v = 1 - t; } // bed: pillow at the head end
+          }
           let px = lx, py = ly, pz = lz;
           if (wall) { // lean against the wall: move base to the wall, tilt the top away from it
             py += 0.22;

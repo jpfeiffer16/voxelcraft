@@ -1,9 +1,9 @@
-// Animals & monsters: dogs, cats, lions (tameable, lions/dogs protect you) and zombies (hostile).
+// Animals & monsters: dogs, cats, lions (tameable, lions/dogs protect you); zombies, wolves, bears, spiders and crocodiles (hostile).
 // Blocky box models, simple AI, physics, health/combat, taming, synthesized sounds, saving.
 window.VC = window.VC || {};
 (function () {
   'use strict';
-  const B = VC.B, { SOLID } = VC.Blocks;
+  const B = VC.B, { SOLID, FLUID } = VC.Blocks;
   const CS = VC.CONST.CS;
 
   const COATS = {
@@ -29,6 +29,24 @@ window.VC = window.VC || {};
       { name: 'Pale', body: 0xe0c48e, mane: 0x5a3418, belly: 0xeedcb4 },
       { name: 'White', body: 0xeee6d2, mane: 0xcdbb98, belly: 0xf6f0e2 },
     ],
+    wolf: [
+      { name: 'Gray wolf', body: 0x8d8d90, dark: 0x5e5e62, light: 0xc9c9cc },
+      { name: 'Timber wolf', body: 0x7b6a58, dark: 0x4e4236, light: 0xb9a68e },
+      { name: 'Black wolf', body: 0x3a3a3e, dark: 0x222225, light: 0x6a6a70 },
+    ],
+    bear: [
+      { name: 'Brown bear', body: 0x6b4426, dark: 0x4a2e18, snout: 0x9a7048 },
+      { name: 'Black bear', body: 0x262222, dark: 0x161414, snout: 0x8a6a4a },
+      { name: 'Polar bear', body: 0xeeeee6, dark: 0xd2d2c8, snout: 0xe0ddd0 },
+    ],
+    spider: [
+      { name: 'Spider', body: 0x3a3030, dark: 0x241d1d, eye: 0xd01818 },
+      { name: 'Cave spider', body: 0x1f4a52, dark: 0x13333a, eye: 0xd01818 },
+    ],
+    croc: [
+      { name: 'Crocodile', body: 0x4f6e33, dark: 0x3a5226, belly: 0xb9b880 },
+      { name: 'Swamp croc', body: 0x5a5e36, dark: 0x3f4324, belly: 0xc2b98a },
+    ],
     zombie: [
       { name: 'Zombie', skin: 0x5d9a4a, shirt: 0x2f8a8a, pants: 0x3b3a8f },
       { name: 'Zombie', skin: 0x6a9a50, shirt: 0x7a4a2a, pants: 0x3a3a3a },
@@ -40,7 +58,11 @@ window.VC = window.VC || {};
     dog: { hw: 0.3, h: 0.85, speed: 1.6, run: 4.6, hp: 10, tame: true, protect: 3 },
     cat: { hw: 0.25, h: 0.7, speed: 1.4, run: 4.8, hp: 8, tame: true },
     lion: { hw: 0.42, h: 1.15, speed: 1.5, run: 5.8, hp: 26, tame: true, protect: 7, neutral: true, attack: 5 },
-    zombie: { hw: 0.3, h: 1.85, speed: 0.9, run: 2.5, hp: 20, hostile: true, attack: 3 },
+    zombie: { hw: 0.3, h: 1.85, speed: 0.9, run: 2.5, hp: 20, hostile: true, attack: 3, reach: 0.6, cooldown: 1.0, sight: 24, burns: true },
+    wolf: { hw: 0.3, h: 0.9, speed: 1.4, run: 5.4, hp: 12, hostile: true, attack: 3, reach: 0.6, cooldown: 0.8, sight: 28, stalk: true, pack: true },
+    bear: { hw: 0.5, h: 1.35, speed: 1.1, run: 4.4, hp: 34, hostile: true, attack: 6, reach: 0.8, cooldown: 1.3, sight: 20 },
+    spider: { hw: 0.45, h: 0.6, speed: 1.5, run: 5.0, hp: 14, hostile: true, attack: 2, reach: 0.6, cooldown: 0.7, sight: 24, stalk: true, climbs: true, leaps: true },
+    croc: { hw: 0.42, h: 0.5, speed: 0.8, run: 3.0, swim: 5.5, hp: 22, hostile: true, attack: 5, reach: 1.0, cooldown: 1.2, sight: 16, aquatic: true },
   };
   VC.MOB_TYPES = TYPES;
   const FACE_SHADE = [0.8, 0.8, 1.0, 0.5, 0.7, 0.7];
@@ -83,7 +105,7 @@ window.VC = window.VC || {};
       parts.collar = add(root, box(0.38, 0.07, 0.1, 0xd02828), 0, 0.68, 0.3);
       for (const [x, z] of [[0.11, 0.24], [-0.11, 0.24], [0.11, -0.24], [-0.11, -0.24]]) parts.legs.push(add(root, box(0.12, 0.4, 0.12, C.body, true), x, 0.4, z));
       parts.tail = add(root, shifted(box(0.08, 0.08, 0.34, C.ear), 0, 0, -0.17), 0, 0.64, -0.34); parts.tail.rotation.x = 0.6;
-      parts.legY = 0.4; parts.tailY = 0.64; parts.headY = 0.72;
+      parts.legY = 0.4; parts.tailY = 0.64; parts.headY = 0.72; parts.headZ = 0.42;
     } else if (type === 'cat') {
       add(torso, box(0.28, 0.26, 0.62, C.body), 0, 0.4, 0);
       if (C.stripes) for (const z of [-0.18, 0, 0.18]) add(torso, box(0.29, 0.06, 0.06, C.stripes), 0, 0.5, z);
@@ -100,7 +122,7 @@ window.VC = window.VC || {};
       const lc = C.points || C.body;
       for (const [x, z] of [[0.08, 0.21], [-0.08, 0.21], [0.08, -0.21], [-0.08, -0.21]]) parts.legs.push(add(root, box(0.09, 0.3, 0.09, lc, true), x, 0.3, z));
       parts.tail = add(root, shifted(box(0.06, 0.06, 0.5, C.points || C.ear), 0, 0, -0.25), 0, 0.5, -0.3); parts.tail.rotation.x = 0.9;
-      parts.legY = 0.3; parts.tailY = 0.5; parts.headY = 0.56;
+      parts.legY = 0.3; parts.tailY = 0.5; parts.headY = 0.56; parts.headZ = 0.36;
     } else if (type === 'lion') {
       add(torso, box(0.52, 0.48, 1.0, C.body), 0, 0.78, 0);
       add(torso, box(0.42, 0.06, 0.8, C.belly), 0, 0.53, 0);
@@ -120,7 +142,70 @@ window.VC = window.VC || {};
       add(parts.tail, shifted(box(0.07, 0.07, 0.6, C.body), 0, 0, -0.3), 0, 0, 0);
       add(parts.tail, box(0.13, 0.13, 0.15, C.mane), 0, 0, -0.62);               // tuft
       parts.tail.rotation.x = -0.5;
-      parts.legY = 0.56; parts.tailY = 0.88; parts.headY = 1.0;
+      parts.legY = 0.56; parts.tailY = 0.88; parts.headY = 1.0; parts.headZ = 0.56;
+    } else if (type === 'wolf') {
+      add(torso, box(0.34, 0.34, 0.74, C.body), 0, 0.6, 0);
+      add(torso, box(0.42, 0.4, 0.3, C.light), 0, 0.64, 0.24);           // ruff
+      add(torso, box(0.35, 0.08, 0.6, C.dark), 0, 0.79, -0.05);           // dark back
+      const head = parts.head = new THREE.Group(); head.position.set(0, 0.76, 0.46); root.add(head);
+      add(head, box(0.32, 0.3, 0.28, C.body), 0, 0, 0);
+      add(head, box(0.18, 0.13, 0.22, C.light), 0, -0.07, 0.22);          // long snout
+      add(head, box(0.07, 0.06, 0.04, 0x111111), 0, -0.03, 0.34);
+      add(head, box(0.06, 0.05, 0.02, 0xffc020), 0.08, 0.05, 0.145);       // yellow eyes
+      add(head, box(0.06, 0.05, 0.02, 0xffc020), -0.08, 0.05, 0.145);
+      add(head, box(0.08, 0.14, 0.06, C.dark), 0.1, 0.2, -0.04);           // pointy ears
+      add(head, box(0.08, 0.14, 0.06, C.dark), -0.1, 0.2, -0.04);
+      add(head, box(0.12, 0.03, 0.02, 0xf2f2f2), 0, -0.13, 0.31);          // fangs
+      for (const [x, z] of [[0.11, 0.25], [-0.11, 0.25], [0.11, -0.25], [-0.11, -0.25]]) parts.legs.push(add(root, box(0.11, 0.45, 0.11, C.body, true), x, 0.45, z));
+      parts.tail = add(root, shifted(box(0.1, 0.1, 0.42, C.dark), 0, 0, -0.21), 0, 0.7, -0.36); parts.tail.rotation.x = 0.5;
+      parts.legY = 0.45; parts.tailY = 0.7; parts.headY = 0.76; parts.headZ = 0.46;
+    } else if (type === 'bear') {
+      add(torso, box(0.86, 0.72, 1.24, C.body), 0, 0.88, 0);
+      add(torso, box(0.7, 0.2, 0.5, C.dark), 0, 1.26, 0.3);               // hump
+      const head = parts.head = new THREE.Group(); head.position.set(0, 1.02, 0.72); root.add(head);
+      add(head, box(0.52, 0.46, 0.4, C.body), 0, 0, 0);
+      add(head, box(0.26, 0.2, 0.2, C.snout), 0, -0.1, 0.28);
+      add(head, box(0.1, 0.07, 0.04, 0x111111), 0, -0.04, 0.39);
+      add(head, box(0.06, 0.06, 0.02, 0x111111), 0.13, 0.08, 0.205);
+      add(head, box(0.06, 0.06, 0.02, 0x111111), -0.13, 0.08, 0.205);
+      add(head, box(0.12, 0.12, 0.08, C.dark), 0.2, 0.26, -0.04);
+      add(head, box(0.12, 0.12, 0.08, C.dark), -0.2, 0.26, -0.04);
+      for (const [x, z] of [[0.26, 0.42], [-0.26, 0.42], [0.26, -0.42], [-0.26, -0.42]]) parts.legs.push(add(root, box(0.26, 0.56, 0.28, C.dark, true), x, 0.56, z));
+      parts.tail = add(root, box(0.14, 0.14, 0.12, C.body), 0, 1.0, -0.66);
+      parts.legY = 0.56; parts.tailY = 1.0; parts.headY = 1.02; parts.headZ = 0.72;
+    } else if (type === 'spider') {
+      add(torso, box(0.46, 0.34, 0.4, C.body), 0, 0.4, 0.12);               // thorax
+      add(torso, box(0.72, 0.5, 0.66, C.dark), 0, 0.48, -0.42);             // abdomen
+      add(torso, box(0.5, 0.06, 0.4, C.body), 0, 0.74, -0.42);
+      const head = parts.head = new THREE.Group(); head.position.set(0, 0.42, 0.42); root.add(head);
+      add(head, box(0.36, 0.3, 0.26, C.body), 0, 0, 0);
+      for (const [x, y] of [[0.1, 0.06], [-0.1, 0.06], [0.05, -0.02], [-0.05, -0.02], [0.14, -0.04], [-0.14, -0.04]]) add(head, box(0.05, 0.05, 0.02, C.eye), x, y, 0.135);
+      add(head, box(0.04, 0.08, 0.06, 0x111111), 0.06, -0.14, 0.1); add(head, box(0.04, 0.08, 0.06, 0x111111), -0.06, -0.14, 0.1); // fangs
+      for (let i = 0; i < 8; i++) { // legs: long thin boxes pivoting at the body, splayed out
+        const side = i < 4 ? 1 : -1, k = i % 4, z = 0.3 - k * 0.17;
+        const g = new THREE.Group(); g.position.set(side * 0.2, 0.44, z); root.add(g);
+        const l = new THREE.Mesh(shifted(box(0.7, 0.06, 0.06, C.dark), side * 0.35, 0, 0), mat); g.add(l);
+        g.rotation.z = side * -0.55; g.rotation.y = (k - 1.5) * 0.35 * side;
+        g.userData = { side, k, baseY: g.rotation.y };
+        parts.legs.push(g);
+      }
+      parts.spider = true; parts.tail = new THREE.Object3D(); root.add(parts.tail);
+      parts.legY = 0.44; parts.tailY = 0.44; parts.headY = 0.42; parts.headZ = 0.42;
+    } else if (type === 'croc') {
+      add(torso, box(0.7, 0.3, 1.3, C.body), 0, 0.3, 0);
+      add(torso, box(0.6, 0.06, 1.2, C.belly), 0, 0.15, 0);
+      for (let i = 0; i < 5; i++) add(torso, box(0.12, 0.06, 0.12, C.dark), (i % 2 ? 0.14 : -0.14), 0.48, 0.5 - i * 0.25); // scutes
+      const head = parts.head = new THREE.Group(); head.position.set(0, 0.32, 0.65); root.add(head);
+      add(head, box(0.5, 0.24, 0.36, C.body), 0, 0.02, 0.1);
+      add(head, box(0.36, 0.12, 0.6, C.body), 0, 0.06, 0.55);              // upper jaw
+      parts.jaw = add(head, box(0.34, 0.08, 0.56, C.belly), 0, -0.06, 0.53); // lower jaw
+      for (let i = 0; i < 4; i++) { add(head, box(0.03, 0.05, 0.03, 0xf4f0e0), 0.16, -0.01, 0.35 + i * 0.13); add(head, box(0.03, 0.05, 0.03, 0xf4f0e0), -0.16, -0.01, 0.35 + i * 0.13); }
+      add(head, box(0.08, 0.08, 0.08, 0xd8c020), 0.15, 0.18, 0.12); add(head, box(0.08, 0.08, 0.08, 0xd8c020), -0.15, 0.18, 0.12);
+      for (const [x, z] of [[0.36, 0.4], [-0.36, 0.4], [0.36, -0.4], [-0.36, -0.4]]) parts.legs.push(add(root, box(0.16, 0.22, 0.18, C.dark, true), x, 0.22, z));
+      parts.tail = new THREE.Group(); parts.tail.position.set(0, 0.3, -0.62); root.add(parts.tail);
+      add(parts.tail, shifted(box(0.4, 0.22, 0.6, C.body), 0, 0, -0.3), 0, 0, 0);
+      add(parts.tail, shifted(box(0.22, 0.14, 0.6, C.dark), 0, 0, -0.85), 0, 0, 0);
+      parts.legY = 0.22; parts.tailY = 0.3; parts.headY = 0.32; parts.headZ = 0.65; parts.low = true;
     } else { // zombie (humanoid)
       add(torso, box(0.5, 0.7, 0.26, C.shirt), 0, 1.07, 0);
       const head = parts.head = new THREE.Group(); head.position.set(0, 1.42, 0); root.add(head);
@@ -131,9 +216,10 @@ window.VC = window.VC || {};
       for (const x of [0.12, -0.12]) parts.legs.push(add(root, box(0.24, 0.72, 0.24, C.pants, true), x, 0.72, 0));
       for (const x of [0.37, -0.37]) { const a = add(root, box(0.22, 0.7, 0.22, C.skin, true), x, 1.38, 0); a.rotation.x = -Math.PI / 2 + 0.1; parts.arms.push(a); }
       parts.collar = new THREE.Object3D();
-      parts.legY = 0.72; parts.headY = 1.42;
+      parts.legY = 0.72; parts.headY = 1.42; parts.headZ = 0;
     }
     parts.torso = torso;
+    if (!parts.collar) parts.collar = new THREE.Object3D();
     return { root, mat, parts };
   }
 
@@ -182,6 +268,39 @@ window.VC = window.VC || {};
       o.frequency.setValueAtTime(120, t); o.frequency.linearRampToValueAtTime(90, t + 0.9);
       lfo.frequency.value = 5; lg.gain.value = 8; lfo.connect(lg); lg.connect(o.frequency);
       env(ctx, g, t, 0.15, 0.4, 1.0); o.connect(f); f.connect(g); g.connect(out); o.start(t); lfo.start(t); o.stop(t + 1.05); lfo.stop(t + 1.05);
+    } else if (type === 'wolf') { // growl + short howl
+      const o = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+      o.type = 'sawtooth'; f.type = 'lowpass'; f.frequency.value = 900; lfo.frequency.value = 30; lg.gain.value = 20; lfo.connect(lg); lg.connect(o.frequency);
+      o.frequency.setValueAtTime(110, t); o.frequency.linearRampToValueAtTime(140, t + 0.5);
+      env(ctx, g, t, 0.05, 0.35, 0.6); o.connect(f); f.connect(g); g.connect(out); o.start(t); lfo.start(t); o.stop(t + 0.62); lfo.stop(t + 0.62);
+      const h = ctx.createOscillator(), hg = ctx.createGain(); h.type = 'triangle';
+      h.frequency.setValueAtTime(420, t + 0.6); h.frequency.linearRampToValueAtTime(640, t + 1.0); h.frequency.linearRampToValueAtTime(520, t + 1.6);
+      hg.gain.setValueAtTime(0.0001, t + 0.6); hg.gain.linearRampToValueAtTime(0.18, t + 0.8); hg.gain.exponentialRampToValueAtTime(0.0001, t + 1.7);
+      h.connect(hg); hg.connect(out); h.start(t + 0.6); h.stop(t + 1.75);
+    } else if (type === 'bear') { // deep roar
+      const n = noise(ctx), f = ctx.createBiquadFilter(), g1 = ctx.createGain();
+      f.type = 'bandpass'; f.frequency.setValueAtTime(180, t); f.frequency.linearRampToValueAtTime(380, t + 0.3); f.frequency.linearRampToValueAtTime(140, t + 1.0); f.Q.value = 1.5;
+      env(ctx, g1, t, 0.1, 0.8, 1.1); n.connect(f); f.connect(g1); g1.connect(out); n.start(t); n.stop(t + 1.15);
+      const o = ctx.createOscillator(), g2 = ctx.createGain(); o.type = 'sawtooth'; o.frequency.setValueAtTime(60, t); o.frequency.linearRampToValueAtTime(85, t + 0.3); o.frequency.linearRampToValueAtTime(45, t + 1.0);
+      env(ctx, g2, t, 0.1, 0.4, 1.05); o.connect(g2); g2.connect(out); o.start(t); o.stop(t + 1.1);
+    } else if (type === 'door_open' || type === 'door_close') { // wooden creak / thunk
+      const op = type === 'door_open';
+      const n = noise(ctx), f = ctx.createBiquadFilter(), g = ctx.createGain();
+      f.type = 'bandpass'; f.frequency.value = op ? 900 : 380; f.Q.value = 3;
+      env(ctx, g, t, 0.005, 0.6, op ? 0.25 : 0.12); n.connect(f); f.connect(g); g.connect(out); n.start(t); n.stop(t + 0.3);
+      const o = ctx.createOscillator(), g2 = ctx.createGain(); o.type = 'square';
+      o.frequency.setValueAtTime(op ? 220 : 110, t); o.frequency.exponentialRampToValueAtTime(op ? 330 : 60, t + 0.15);
+      env(ctx, g2, t, 0.005, 0.12, 0.16); o.connect(g2); g2.connect(out); o.start(t); o.stop(t + 0.18);
+    } else if (type === 'spider') { // clicking hiss
+      for (let k = 0; k < 3; k++) {
+        const n = noise(ctx), f = ctx.createBiquadFilter(), g = ctx.createGain(), s0 = t + k * 0.13;
+        f.type = 'highpass'; f.frequency.value = 2500; env(ctx, g, s0, 0.01, 0.3, 0.12); n.connect(f); f.connect(g); g.connect(out); n.start(s0); n.stop(s0 + 0.13);
+      }
+    } else if (type === 'croc') { // low hiss + jaw snap
+      const n = noise(ctx), f = ctx.createBiquadFilter(), g = ctx.createGain(); f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.8;
+      env(ctx, g, t, 0.08, 0.3, 0.7); n.connect(f); f.connect(g); g.connect(out); n.start(t); n.stop(t + 0.72);
+      const s2 = ctx.createOscillator(), g2 = ctx.createGain(); s2.type = 'square'; s2.frequency.setValueAtTime(180, t + 0.72); s2.frequency.exponentialRampToValueAtTime(60, t + 0.8);
+      env(ctx, g2, t + 0.72, 0.003, 0.35, 0.1); s2.connect(g2); g2.connect(out); s2.start(t + 0.72); s2.stop(t + 0.84);
     } else if (type === 'hurt') {
       const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'square';
       o.frequency.setValueAtTime(330, t); o.frequency.exponentialRampToValueAtTime(140, t + 0.15);
@@ -213,25 +332,30 @@ window.VC = window.VC || {};
     constructor(scene, world, opts) {
       this.scene = scene; this.world = world;
       this.list = []; this.particles = [];
-      this.max = opts.max || 16; this.maxWild = opts.maxWild || 6; this.maxZombies = opts.maxZombies || 6; this.maxWildLions = opts.maxWildLions || 2;
-      this.spawnTimer = 3; this.zombieTimer = 4; this.sound = true; this.hostile = true;
+      this.max = opts.max || 16; this.maxWild = opts.maxWild || 6; this.maxHostile = opts.maxHostile || opts.maxZombies || 12; this.maxWildLions = opts.maxWildLions || 2;
+      this.mobile = !!opts.mobile;
+      this.spawnTimer = 3; this.hostileTimer = 4; this.sound = true; this.hostile = true;
       this.daylight = 1; this.player = null;
       this.onPlayerDamage = null; // (amount, mob) => void
     }
+    get maxZombies() { return this.maxHostile; }
     get count() { return this.list.length; }
-    animals() { return this.list.filter(m => !m.hostile).length; }
-    zombies() { return this.list.filter(m => m.hostile).length; }
+    animals() { let n = 0; for (const m of this.list) if (!m.hostile) n++; return n; }
+    hostiles() { let n = 0; for (const m of this.list) if (m.hostile) n++; return n; }
+    zombies() { return this.hostiles(); }
+    countType(t) { let n = 0; for (const m of this.list) if (m.type === t) n++; return n; }
     dispose() { for (const m of this.list) this.scene.remove(m.model.root); this.list = []; for (const p of this.particles) this.scene.remove(p.s); this.particles = []; }
     spawn(type, x, y, z, o = {}) {
       const T = TYPES[type]; if (!T) return null;
-      if (T.hostile ? this.zombies() >= this.maxZombies : this.animals() >= this.max) return null;
+      if (T.hostile ? this.hostiles() >= this.maxHostile : this.animals() >= this.max) return null;
       const coats = COATS[type];
       const coatIdx = o.coat != null ? o.coat % coats.length : (Math.random() * coats.length) | 0;
       const model = buildModel(type, coats[coatIdx]);
       const m = Object.assign({ type, coat: coatIdx, model, pos: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), yaw: o.yaw != null ? o.yaw : Math.random() * Math.PI * 2,
         tamed: !!o.tamed, sitting: !!o.sitting, wild: o.wild !== undefined ? o.wild : false, state: 'idle', timer: 1 + Math.random() * 3,
-        dir: 0, phase: 0, onGround: false, lightT: 0, soundT: 8 + Math.random() * 25, hpMax: T.hp, cd: 0, attackAnim: 0, hurtT: 0, angry: 0, enemy: null, burnT: 0, dead: false }, T);
-      m.hp = o.hp != null ? o.hp : T.hp;
+        dir: 0, phase: 0, onGround: false, lightT: 0, soundT: 4 + Math.random() * 20, hpMax: T.hp, cd: 0, attackAnim: 0, hurtT: 0, angry: 0, enemy: null, burnT: 0, dead: false,
+        foe: null, foeT: 0, regenT: 0, lavaT: 0, climbing: false, leapT: 0 }, T);
+      m.hp = o.hp != null ? Math.min(o.hp, T.hp) : T.hp;
       model.parts.collar.visible = m.tamed;
       model.root.position.copy(m.pos);
       this.scene.add(model.root);
@@ -242,23 +366,16 @@ window.VC = window.VC || {};
     setHostile(on) { this.hostile = on; if (!on) for (const m of [...this.list]) if (m.hostile) this.remove(m); if (!on) for (const m of this.list) m.angry = 0; }
     // ----- physics helpers -----
     solid(x, y, z) { const id = this.world.getBlock(Math.floor(x), Math.floor(y), Math.floor(z)); return id === -1 || SOLID[id] === 1; }
-    collides(m, px, py, pz) {
-      const hw = m.hw;
-      for (let y = Math.floor(py); y <= Math.floor(py + m.h - 1e-6); y++)
-        for (let z = Math.floor(pz - hw); z <= Math.floor(pz + hw - 1e-6); z++)
-          for (let x = Math.floor(px - hw); x <= Math.floor(px + hw - 1e-6); x++) {
-            const id = this.world.getBlock(x, y, z); if (id === -1 || SOLID[id]) return true;
-          }
-      return false;
-    }
+    collides(m, px, py, pz) { return VC.Blocks.aabbHit(this.world, px - m.hw, py, pz - m.hw, px + m.hw, py + m.h, pz + m.hw); }
     moveAxis(m, axis, d) {
       if (!d) return false;
       const p = m.pos, steps = Math.ceil(Math.abs(d) / 0.3), s = d / steps;
       for (let i = 0; i < steps; i++) {
         const before = p.getComponent(axis);
         p.setComponent(axis, before + s);
-        if (this.collides(m, p.x, p.y, p.z)) {
-          if (axis === 1 && s < 0) { p.y = Math.floor(p.y) + 1 + 1e-4; if (this.collides(m, p.x, p.y, p.z)) p.y = before; }
+        const hit = this.collides(m, p.x, p.y, p.z);
+        if (hit) {
+          if (axis === 1 && s < 0) { p.y = hit.maxY + 1e-4; if (p.y - before > 0.6 || this.collides(m, p.x, p.y, p.z)) p.y = before; }
           else p.setComponent(axis, before);
           return true;
         }
@@ -266,10 +383,12 @@ window.VC = window.VC || {};
       return false;
     }
     loaded(x, z) { const c = this.world.getChunk(Math.floor(x / CS), Math.floor(z / CS)); return c && c.meshes; }
-    safeGround(x, y, z) {
+    fluidAt(x, y, z) { const id = this.world.getBlock(Math.floor(x), Math.floor(y), Math.floor(z)); return id > 0 ? FLUID[id] : 0; }
+    safeGround(x, y, z, aquatic) {
       for (let dy = 0; dy <= 3; dy++) {
         const id = this.world.getBlock(Math.floor(x), Math.floor(y) - 1 - dy, Math.floor(z));
-        if (id === B.WATER || id === -1) return false;
+        if (id === -1) return false;
+        if (id > 0 && FLUID[id]) return aquatic && FLUID[id] === 1;
         if (SOLID[id]) return true;
       }
       return false;
@@ -277,13 +396,13 @@ window.VC = window.VC || {};
     surfaceY(x, z) {
       for (let y = 120; y > 1; y--) {
         const id = this.world.getBlock(x, y, z);
+        if (id > 0 && FLUID[id]) return { y: y + 1, id };
         if (id > 0 && SOLID[id]) return { y: y + 1, id };
-        if (id === B.WATER) return { y: y + 1, id };
       }
       return null;
     }
     skyOpen(x, y, z) { for (let yy = y + 1; yy < Math.min(127, y + 48); yy++) { const id = this.world.getBlock(x, yy, z); if (id > 0 && VC.Blocks.OPAQUE[id]) return false; } return true; }
-    clear2(x, y, z) { return !SOLID[this.world.getBlock(x, y, z)] && !SOLID[this.world.getBlock(x, y + 1, z)] && this.world.getBlock(x, y, z) !== B.WATER; }
+    clear2(x, y, z) { const a = this.world.getBlock(x, y, z), b = this.world.getBlock(x, y + 1, z); return a >= 0 && b >= 0 && !SOLID[a] && !SOLID[b] && !FLUID[a]; }
     spawnNatural(player) {
       // animals on grass (lions also on sand) near the player
       if (this.animals() < this.max) {
@@ -305,35 +424,67 @@ window.VC = window.VC || {};
         }
       }
     }
-    spawnZombie(player) {
-      if (!this.hostile || this.zombies() >= this.maxZombies || player.dead) return;
+    treesNear(x, y, z) { let n = 0; for (let dz = -5; dz <= 5; dz += 2) for (let dx = -5; dx <= 5; dx += 2) for (let dy = 2; dy <= 8; dy += 2) { const id = this.world.getBlock(x + dx, y + dy, z + dz); if (id === B.LEAVES || id === B.BIRCH_LEAVES) { n++; break; } } return n; }
+    waterNear(x, y, z) { for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) for (let dy = -2; dy <= 0; dy++) { const id = this.world.getBlock(x + dx, y + dy, z + dz); if (id > 0 && FLUID[id] === 1) return true; } return false; }
+    groupSpawn(type, n, x, y, z) {
+      let made = 0;
+      for (let i = 0; i < n; i++) {
+        const ox = x + (i ? Math.round((Math.random() - 0.5) * 4) : 0), oz = z + (i ? Math.round((Math.random() - 0.5) * 4) : 0);
+        let yy = y; for (let k = 0; k < 4 && !(SOLID[this.world.getBlock(ox, yy - 1, oz)] && this.clear2(ox, yy, oz)); k++) yy = k % 2 ? y - (k + 1) / 2 : y + (k + 1) / 2;
+        if (!SOLID[this.world.getBlock(ox, yy - 1, oz)] || !this.clear2(ox, yy, oz)) continue;
+        if (this.spawn(type, ox + 0.5, yy, oz + 0.5, { wild: true })) made++;
+      }
+      return made;
+    }
+    // Hostile spawning: zombies (night surface + caves, sometimes in small hordes), spiders (night + caves),
+    // wolf packs (night, near trees), bears (forests / snow, any time, rare), crocodiles (by water, any time, rare).
+    spawnHostile(player) {
+      if (!this.hostile || player.dead || this.hostiles() >= this.maxHostile) return;
       const night = this.daylight < 0.4;
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const a = Math.random() * Math.PI * 2, r = 12 + Math.random() * 20;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const a = Math.random() * Math.PI * 2, r = 14 + Math.random() * 20;
         const x = Math.floor(player.pos.x + Math.cos(a) * r), z = Math.floor(player.pos.z + Math.sin(a) * r);
         if (!this.loaded(x, z)) continue;
-        let spot = null;
-        if (night && Math.random() < 0.7) { const s = this.surfaceY(x, z); if (s && s.id !== B.WATER && SOLID[s.id] && this.clear2(x, s.y, z)) spot = s.y; }
-        if (spot == null) { // caves: dark air pocket around the player's height
-          const y0 = Math.floor(player.pos.y) + 6;
-          for (let y = y0; y > Math.max(2, y0 - 22); y--) {
-            if (SOLID[this.world.getBlock(x, y - 1, z)] && this.clear2(x, y, z) && !this.skyOpen(x, y, z)) { spot = y; break; }
+        if (Math.hypot(x + 0.5 - player.pos.x, z + 0.5 - player.pos.z) < 12) continue;
+        const surf = this.surfaceY(x, z);
+        const roll = Math.random();
+        // --- surface
+        if (surf && Math.random() < 0.7) {
+          const y = surf.y, gid = surf.id;
+          if (FLUID[gid] || !SOLID[gid] || !this.clear2(x, y, z)) continue;
+          if (this.world.getBlockLight(x, y, z) >= 7 || this.world.getBlockLight(x, y + 1, z) >= 7) continue; // torches keep monsters away
+          const forest = this.treesNear(x, y, z) >= 2, snowy = gid === B.SNOW;
+          if (!night) { // daytime predators
+            if ((forest || snowy) && roll < 0.35 && this.countType('bear') < (this.mobile ? 1 : 2)) { this.spawn('bear', x + 0.5, y, z + 0.5, { wild: true, coat: snowy ? 2 : (Math.random() < 0.6 ? 0 : 1) }); return; }
+            if ((gid === B.SAND || gid === B.GRASS || gid === B.DIRT) && this.waterNear(x, y, z) && roll > 0.6 && this.countType('croc') < (this.mobile ? 1 : 2)) { this.spawn('croc', x + 0.5, y, z + 0.5, { wild: true }); return; }
+            continue;
+          }
+          if (forest && roll < 0.22 && this.countType('wolf') < (this.mobile ? 3 : 6)) { this.groupSpawn('wolf', 2 + ((Math.random() * 2) | 0), x, y, z); return; }
+          if ((forest || snowy) && roll < 0.3 && this.countType('bear') < (this.mobile ? 1 : 2)) { this.spawn('bear', x + 0.5, y, z + 0.5, { wild: true, coat: snowy ? 2 : 0 }); return; }
+          if (roll < 0.5) { this.spawn('spider', x + 0.5, y, z + 0.5, { wild: true }); return; }
+          if (this.waterNear(x, y, z) && roll < 0.58 && this.countType('croc') < 2) { this.spawn('croc', x + 0.5, y, z + 0.5, { wild: true }); return; }
+          // zombies, sometimes a small horde
+          const horde = Math.random() < 0.3 ? 2 + ((Math.random() * (this.mobile ? 2 : 3)) | 0) : 1;
+          this.groupSpawn('zombie', horde, x, y, z); return;
+        }
+        // --- caves: a dark air pocket around the player's height (any time of day)
+        const y0 = Math.floor(player.pos.y) + 6;
+        for (let y = y0; y > Math.max(2, y0 - 24); y--) {
+          if (SOLID[this.world.getBlock(x, y - 1, z)] && this.clear2(x, y, z) && !this.skyOpen(x, y, z)) {
+            if (this.world.getBlockLight(x, y, z) >= 7 || this.world.getBlockLight(x, y + 1, z) >= 7) break;
+            if (roll < 0.35) this.spawn('spider', x + 0.5, y, z + 0.5, { wild: true, coat: Math.random() < 0.5 ? 1 : 0 });
+            else this.groupSpawn('zombie', Math.random() < 0.25 ? 2 : 1, x, y, z);
+            return;
           }
         }
-        if (spot == null) continue;
-        if (this.world.getBlockLight(x, spot, z) >= 7 || this.world.getBlockLight(x, spot + 1, z) >= 7) continue; // torches keep zombies away
-        if (!night && this.skyOpen(x, spot, z)) continue;
-        if (Math.hypot(x + 0.5 - player.pos.x, z + 0.5 - player.pos.z) < 10) continue;
-        this.spawn('zombie', x + 0.5, spot, z + 0.5, { wild: true });
-        return;
       }
     }
     update(dt, player, daylight) {
       this.daylight = daylight; this.player = player;
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) { this.spawnTimer = 4 + Math.random() * 4; this.spawnNatural(player); }
-      this.zombieTimer -= dt;
-      if (this.zombieTimer <= 0) { this.zombieTimer = 3 + Math.random() * 3; this.spawnZombie(player); }
+      this.hostileTimer -= dt;
+      if (this.hostileTimer <= 0) { this.hostileTimer = daylight < 0.4 ? 1.5 + Math.random() * 2 : 3 + Math.random() * 4; this.spawnHostile(player); }
       for (let i = this.list.length - 1; i >= 0; i--) {
         const m = this.list[i]; if (!m) continue;
         const dx = player.pos.x - m.pos.x, dz = player.pos.z - m.pos.z, dist = Math.hypot(dx, dz);
@@ -344,15 +495,19 @@ window.VC = window.VC || {};
         }
         m.model.root.visible = true;
         m.cd -= dt; m.attackAnim = Math.max(0, m.attackAnim - dt); m.hurtT = Math.max(0, m.hurtT - dt); if (m.angry > 0) m.angry -= dt;
+        if (m.foeT > 0) { m.foeT -= dt; if (m.foeT <= 0 || (m.foe && m.foe.dead)) m.foe = null; }
         this.think(m, dt, player, dx, dz, dist);
         if (m.dead) continue;
         this.physics(m, dt);
+        if (m.dead) continue;
         this.animate(m, dt);
         // zombies burn in daylight
-        if (m.hostile && this.daylight > 0.55 && m.skyB === 1) {
+        if (m.burns && this.daylight > 0.55 && m.skyB === 1) {
           m.burnT -= dt;
           if (m.burnT <= 0) { m.burnT = 0.8; this.particle(fireTex, new THREE.Vector3(m.pos.x, m.pos.y + 0.6, m.pos.z), 3, 0.5, 1.4, 0.6); this.particle(puffTex, new THREE.Vector3(m.pos.x, m.pos.y + 1.8, m.pos.z), 1, 0.3, 0.9, 0.8); this.damage(m, 3, null, null); if (m.dead) continue; }
         }
+        // tamed animals slowly heal
+        if (m.tamed && m.hp < m.hpMax) { m.regenT += dt; if (m.regenT > 4) { m.regenT = 0; m.hp++; } }
         m.soundT -= dt;
         if (m.soundT <= 0) { m.soundT = (m.hostile ? 6 : 15) + Math.random() * 30; if (this.sound && dist < 16 && m.type !== 'lion') playSound(m.type, (1 - dist / 16) * 0.6); }
       }
@@ -370,10 +525,11 @@ window.VC = window.VC || {};
       if (this.collides(m, m.pos.x, m.pos.y, m.pos.z)) m.pos.set(player.pos.x, player.pos.y + 0.2, player.pos.z);
       m.vel.set(0, 0, 0);
     }
-    // nearest threat to the player for protectors: whoever hurt the player, else zombies near the player/protector
+    // nearest threat to the player for protectors: whoever hurt the player, else hostiles near the player/protector
     findEnemy(m, player) {
       const la = player.lastAttacker;
       if (la && !la.dead && !la.tamed && player.lastAttackT > 0 && la !== m) return la;
+      if (m.foe && !m.foe.dead && m.foeT > 0) return m.foe; // fight back
       let best = null, bd = 12;
       for (const o of this.list) {
         if (o.dead || !(o.hostile || (o.angry > 0 && !o.tamed))) continue;
@@ -384,10 +540,11 @@ window.VC = window.VC || {};
     }
     think(m, dt, player, dx, dz, dist) {
       m.timer -= dt;
-      let speed = 0, chase = null;
+      let speed = 0, chase = null, stalking = false;
       if (m.hostile || (m.angry > 0 && !m.tamed)) {
-        // hostile: chase and melee the player
-        if (this.hostile && !player.dead && dist < 24 && Math.abs(player.pos.y - m.pos.y) < 10) chase = player;
+        // a predator bitten by a pet fights that pet; otherwise it hunts the player
+        if (m.foe && !m.foe.dead && m.foeT > 0 && m.foe.pos.distanceTo(m.pos) < 16) chase = m.foe;
+        else if (this.hostile && !player.dead && dist < (m.sight || 24) && Math.abs(player.pos.y - m.pos.y) < 10) chase = player;
         else if (m.angry > 0 && !m.hostile) m.angry = 0;
       } else if (m.tamed && m.protect && !m.sitting) {
         const e = this.findEnemy(m, player);
@@ -398,20 +555,28 @@ window.VC = window.VC || {};
         const tx = chase.pos.x - m.pos.x, tz = chase.pos.z - m.pos.z, td = Math.hypot(tx, tz);
         m.dir = Math.atan2(tx, tz);
         speed = m.run;
-        const reach = (m.hw + (chase.hw || 0.3)) + (m.type === 'lion' ? 0.9 : 0.6);
-        if (td < reach && Math.abs(chase.pos.y - m.pos.y) < 1.6) {
+        // stalkers creep up, then rush
+        if (m.stalk && chase === player && td > 9) { speed = m.speed * 1.2; stalking = true; }
+        if (m.aquatic && m.inWater) speed = m.swim || m.run;
+        const reach = (m.hw + (chase.hw || 0.3)) + (m.reach != null ? m.reach : m.type === 'lion' ? 0.9 : 0.6);
+        // spiders leap at their target
+        if (m.leaps && m.onGround && td < 4 && td > 1.6 && m.leapT <= 0) { m.vel.y = 6; m.vel.x = Math.sin(m.dir) * 7; m.vel.z = Math.cos(m.dir) * 7; m.knock = 0.3; m.leapT = 2.5; }
+        if (m.leapT > 0) m.leapT -= dt;
+        if (td < reach && Math.abs(chase.pos.y - m.pos.y) < 1.8) {
           speed = 0.5;
           if (m.cd <= 0) {
             m.attackAnim = 0.35;
-            if (chase === player) { m.cd = 1.0; if (this.onPlayerDamage) this.onPlayerDamage(m.attack || 3, m); }
+            if (chase === player) { m.cd = m.cooldown || 1.0; if (this.onPlayerDamage) this.onPlayerDamage(m.attack || 3, m); }
             else {
-              m.cd = m.type === 'lion' ? 1.1 : 0.9;
+              m.cd = m.cooldown || (m.type === 'lion' ? 1.1 : 0.9);
               if (m.type === 'lion' && m.onGround) { m.vel.y = 5.5; m.vel.x += Math.sin(m.yaw) * 3; m.vel.z += Math.cos(m.yaw) * 3; } // pounce
               this.damage(chase, m.protect || m.attack || 2, m.pos, m);
             }
+            if (this.sound && m.hostile && Math.random() < 0.35) playSound(m.type, 0.5);
           }
         }
         if (!m.engaged && m.type === 'lion' && chase !== player) { m.engaged = true; if (this.sound) playSound('lion', 0.8); }
+        if (!m.engaged && (m.type === 'bear' || m.type === 'wolf') && chase === player && !stalking) { m.engaged = true; if (this.sound) playSound(m.type, 0.7); }
       } else {
         m.engaged = false;
         if (m.sitting) { m.state = 'sit'; }
@@ -434,41 +599,48 @@ window.VC = window.VC || {};
       let dy = m.dir - m.yaw; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
       if (speed > 0) m.yaw += dy * Math.min(1, dt * 8);
       const sx = Math.sin(m.yaw), sz = Math.cos(m.yaw);
+      m.climbing = false;
       if (speed > 0) {
         const ax = m.pos.x + sx * (m.hw + 0.35), az = m.pos.z + sz * (m.hw + 0.35), fy = m.pos.y;
-        if (this.solid(ax, fy, az)) {
-          if (!this.solid(ax, fy + 1, az) && !this.solid(m.pos.x, fy + m.h + 0.6, m.pos.z) && m.onGround) m.vel.y = 7.2; // hop up one block
+        if (this.solid(ax, fy + 0.1, az)) {
+          if (m.climbs && (m.state === 'chase' || m.state === 'walk')) { m.climbing = true; }        // spiders walk up walls
+          else if (!this.solid(ax, fy + 1.1, az) && !this.solid(m.pos.x, fy + m.h + 0.6, m.pos.z) && m.onGround) m.vel.y = 7.2; // hop up one block
           else if (m.state !== 'follow' && m.state !== 'chase') { m.dir += Math.PI * (0.5 + Math.random()); speed = 0; }
-        } else if (!m.inWater && !this.safeGround(ax, fy, az)) {
+        } else if (!m.inWater && !this.safeGround(ax, fy, az, m.aquatic)) {
           const target = chase || (m.state === 'follow' ? player : null);
-          if (target && target.pos.y < m.pos.y - 0.5 && target.pos.y > m.pos.y - 4.5 && !this.waterAhead(ax, fy, az)) { /* follow down small drops */ }
+          if (this.fluidAt(ax, fy - 0.5, az) === 2 || this.fluidAt(ax, fy + 0.2, az) === 2) { speed = 0; m.dir += Math.PI * 0.7; }    // never walk into lava
+          else if (target && target.pos.y < m.pos.y - 0.5 && target.pos.y > m.pos.y - 4.5 && !this.waterAhead(ax, fy, az)) { /* follow down small drops */ }
+          else if (m.climbs && target) { /* spiders drop down */ }
           else { speed = 0; if (m.state !== 'follow' && m.state !== 'chase') { m.dir += Math.PI * (0.6 + Math.random() * 0.8); m.state = 'idle'; m.timer = 0.5; } }
         }
       }
       if ((m.state === 'idle' || m.state === 'sit') && dist < 6) { let d2 = Math.atan2(dx, dz) - m.yaw; while (d2 > Math.PI) d2 -= 2 * Math.PI; while (d2 < -Math.PI) d2 += 2 * Math.PI; m.lookYaw = Math.max(-0.8, Math.min(0.8, d2)); }
       else m.lookYaw = 0;
-      if (m.knock > 0) { m.knock -= dt; return; } // being knocked back: no steering
-      const k = Math.min(1, dt * (m.onGround ? 10 : 2));
+      if (m.knock > 0) { m.knock -= dt; return; } // being knocked back / leaping: no steering
+      const k = Math.min(1, dt * (m.onGround || m.inWater ? 10 : 2));
       m.vel.x += (sx * speed - m.vel.x) * k;
       m.vel.z += (sz * speed - m.vel.z) * k;
     }
-    waterAhead(x, y, z) { for (let dy = 1; dy <= 4; dy++) { const id = this.world.getBlock(Math.floor(x), Math.floor(y) - dy, Math.floor(z)); if (id === B.WATER) return true; if (id > 0 && SOLID[id]) return false; } return false; }
+    waterAhead(x, y, z) { for (let dy = 1; dy <= 4; dy++) { const id = this.world.getBlock(Math.floor(x), Math.floor(y) - dy, Math.floor(z)); if (id > 0 && FLUID[id]) return true; if (id > 0 && SOLID[id]) return false; } return false; }
     physics(m, dt) {
-      const id = this.world.getBlock(Math.floor(m.pos.x), Math.floor(m.pos.y + 0.3), Math.floor(m.pos.z));
-      m.inWater = id === B.WATER;
-      if (m.inWater) { m.vel.y = Math.min(m.vel.y + 18 * dt, 2.5); m.vel.x *= 0.95; m.vel.z *= 0.95; }
+      const fl = this.fluidAt(m.pos.x, m.pos.y + 0.3, m.pos.z);
+      m.inWater = fl === 1; m.inLava = fl === 2;
+      if (m.inWater) { m.vel.y = Math.min(m.vel.y + (m.aquatic ? 12 : 18) * dt, m.aquatic ? 1.2 : 2.5); if (!m.aquatic) { m.vel.x *= 0.95; m.vel.z *= 0.95; } }
+      else if (m.inLava) { m.vel.y = Math.min(m.vel.y + 8 * dt, 1.5); m.vel.x *= 0.85; m.vel.z *= 0.85; }
+      else if (m.climbing) m.vel.y = 2.6;
       else m.vel.y = Math.max(m.vel.y - 28 * dt, -40);
       if (this.moveAxis(m, 0, m.vel.x * dt)) m.vel.x = 0;
       if (this.moveAxis(m, 2, m.vel.z * dt)) m.vel.z = 0;
       const vy = m.vel.y * dt, hit = this.moveAxis(m, 1, vy);
       m.onGround = hit && vy < 0;
       if (hit) m.vel.y = 0;
+      if (m.inLava) { m.lavaT -= dt; if (m.lavaT <= 0) { m.lavaT = 0.5; this.particle(fireTex, new THREE.Vector3(m.pos.x, m.pos.y + 0.5, m.pos.z), 2, 0.5, 1.4, 0.5); this.damage(m, 4, null, 'lava'); if (m.dead) return; } }
       if (m.pos.y < -10) { if (m.hostile || m.wild) { this.remove(m); return; } m.pos.y = 100; }
     }
     animate(m, dt) {
       const P = m.model.parts, root = m.model.root;
       const hs = Math.hypot(m.vel.x, m.vel.z);
-      m.phase += dt * hs * (m.type === 'cat' ? 9 : m.type === 'lion' ? 5.5 : m.type === 'zombie' ? 4 : 7.5);
+      m.phase += dt * hs * ({ cat: 9, lion: 5.5, zombie: 4, bear: 4, croc: 5, spider: 9, wolf: 7 }[m.type] || 7.5);
       const sw = Math.min(1, hs / 1.5) * 0.7;
       const sit = m.sitting, atk = m.attackAnim > 0 ? Math.sin((1 - m.attackAnim / 0.35) * Math.PI) : 0;
       const t = performance.now() / 1000;
@@ -476,22 +648,31 @@ window.VC = window.VC || {};
         P.legs.forEach((l, i) => { l.rotation.x = Math.sin(m.phase + i * Math.PI) * sw; });
         P.arms.forEach((a, i) => { a.rotation.x = -Math.PI / 2 + 0.1 + Math.sin(t * 2 + i) * 0.05 + atk * 0.9; });
         P.torso.rotation.x = atk * 0.15;
+      } else if (P.spider) {
+        P.legs.forEach((g, i) => { const u = g.userData, ph = m.phase + (u.k % 2 ? Math.PI : 0) + (u.side > 0 ? 0 : Math.PI);
+          g.rotation.y = u.baseY + Math.sin(ph) * 0.35 * Math.min(1, hs);
+          g.rotation.z = u.side * (-0.55 + Math.max(0, Math.cos(ph)) * 0.25 * Math.min(1, hs) - (m.climbing ? 0.4 : 0)); });
+        P.torso.rotation.x = m.climbing ? -0.9 : -atk * 0.2;
+        root.rotation.x = 0;
       } else {
         P.legs.forEach((l, i) => {
           if (sit && i >= 2) { l.rotation.x = -1.35; l.position.y = P.legY * 0.55; }
           else { l.rotation.x = (i < 2 ? -atk * 1.1 : 0) + Math.sin(m.phase + (i === 0 || i === 3 ? 0 : Math.PI)) * sw; l.position.y = P.legY; }
         });
-        P.torso.rotation.x = sit ? -0.38 : -atk * 0.3; P.torso.position.y = sit ? -0.1 * (P.legY / 0.4) : 0; P.torso.position.z = sit ? -0.08 : 0;
+        P.torso.rotation.x = sit ? -0.38 : -atk * (m.type === 'croc' ? 0 : 0.3); P.torso.position.y = sit ? -0.1 * (P.legY / 0.4) : 0; P.torso.position.z = sit ? -0.08 : 0;
         if (m.type === 'dog') { P.tail.rotation.y = Math.sin(t * (m.tamed ? 14 : 6)) * (m.tamed ? 0.6 : 0.25); P.tail.rotation.x = sit ? 0.1 : 0.7; }
         else if (m.type === 'cat') { P.tail.rotation.y = Math.sin(t * 2.2 + m.coat) * 0.35; P.tail.rotation.x = sit ? 0.05 : 0.9 + Math.sin(t * 1.3) * 0.1; }
-        else { P.tail.rotation.y = Math.sin(t * 1.6 + m.coat) * 0.4; P.tail.rotation.x = sit ? 0.3 : -0.45 + Math.sin(t * 1.1) * 0.12; }
-        P.tail.position.y = P.tailY - (sit ? P.legY * 0.5 : 0);
+        else if (m.type === 'lion') { P.tail.rotation.y = Math.sin(t * 1.6 + m.coat) * 0.4; P.tail.rotation.x = sit ? 0.3 : -0.45 + Math.sin(t * 1.1) * 0.12; }
+        else if (m.type === 'wolf') { P.tail.rotation.y = Math.sin(t * 3) * 0.15; P.tail.rotation.x = m.state === 'chase' ? 0.1 : 0.6; P.torso.rotation.x = m.state === 'chase' && hs < 2.5 ? 0.12 : P.torso.rotation.x; }
+        else if (m.type === 'croc') { P.tail.rotation.y = Math.sin(m.phase * 0.6 + t) * 0.35; if (P.jaw) P.jaw.rotation.x = 0.1 + atk * 0.6 + (m.state === 'chase' ? 0.15 : 0); }
+        if (m.type !== 'croc' && m.type !== 'bear') P.tail.position.y = P.tailY - (sit ? P.legY * 0.5 : 0);
       }
       P.head.rotation.y += ((m.lookYaw || 0) - P.head.rotation.y) * Math.min(1, dt * 6);
-      P.head.rotation.x = m.type === 'zombie' ? 0 : -atk * 0.4;
-      P.head.position.y = P.headY + (sit ? 0.04 : 0) + (m.state === 'idle' ? Math.sin(t * 2 + m.coat) * 0.01 : 0);
-      P.head.position.z = (m.type === 'lion' ? 0.56 : m.type === 'dog' ? 0.42 : m.type === 'cat' ? 0.36 : 0) + atk * 0.15;
+      P.head.rotation.x = m.type === 'zombie' || m.type === 'croc' ? 0 : -atk * 0.4;
+      P.head.position.y = P.headY + (sit ? 0.04 : 0) + (m.state === 'idle' ? Math.sin(t * 2 + m.coat) * 0.01 : 0) - (m.type === 'wolf' && m.state === 'chase' ? 0.08 : 0);
+      P.head.position.z = (P.headZ || 0) + atk * 0.15;
       root.position.copy(m.pos); root.rotation.y = m.yaw;
+      if (m.inWater && m.aquatic) root.position.y -= 0.3; // crocodiles float low in the water
       m.lightT -= dt;
       if (m.lightT <= 0) {
         m.lightT = 0.25;
@@ -508,11 +689,12 @@ window.VC = window.VC || {};
       m.hp -= amount; m.hurtT = 0.2;
       if (fromPos) {
         const dx = m.pos.x - fromPos.x, dz = m.pos.z - fromPos.z, d = Math.hypot(dx, dz) || 1;
-        const k = Math.min(9, 4 + amount * 0.4);
+        const k = Math.min(9, 4 + amount * 0.4) * (m.type === 'bear' ? 0.5 : 1);
         m.vel.x = dx / d * k; m.vel.z = dz / d * k; m.vel.y = Math.max(m.vel.y, 4.5); m.knock = 0.25;
       }
       if (attacker === 'player' && m.neutral && !m.tamed) m.angry = 20; // provoked lions fight back
-      if (this.sound) playSound(m.type === 'zombie' ? 'zombie' : 'hit', 0.5);
+      if (attacker && typeof attacker === 'object' && attacker !== m && (m.hostile || m.tamed)) { m.foe = attacker; m.foeT = 6; } // fight back against pets / predators
+      if (this.sound) playSound(m.hostile ? m.type : 'hit', 0.5);
       if (m.hp <= 0) {
         this.particle(puffTex, new THREE.Vector3(m.pos.x, m.pos.y + m.h * 0.5, m.pos.z), 8, 0.8, 0.7, 0.8);
         this.remove(m);
@@ -543,7 +725,7 @@ window.VC = window.VC || {};
         this.scene.add(s); this.particles.push({ s, t: -i * 0.12, life, vy });
       }
     }
-    name(m) { return { dog: 'Dog', cat: 'Cat', lion: 'Lion', zombie: 'Zombie' }[m.type]; }
+    name(m) { return { dog: 'Dog', cat: 'Cat', lion: 'Lion', zombie: 'Zombie', wolf: 'Wolf', bear: 'Bear', spider: 'Spider', croc: 'Crocodile' }[m.type]; }
     // right-click / tap: tame, then toggle sit <-> follow
     interact(m) {
       if (m.hostile) return null;
@@ -556,9 +738,9 @@ window.VC = window.VC || {};
       if (this.sound) playSound(m.type, 0.7);
       return msg;
     }
-    // left-click / long-press: hit zombies & wild lions, pet tamed animals, shoo wild dogs/cats
+    // left-click / long-press: hit hostiles & wild lions, pet tamed animals, shoo wild dogs/cats
     hit(m, fromPos) {
-      if (m.hostile || (m.type === 'lion' && !m.tamed)) { this.damage(m, 4, fromPos, 'player'); return null; }
+      if (m.hostile || (m.type === 'lion' && !m.tamed)) { this.damage(m, 5, fromPos, 'player'); return null; }
       if (m.tamed) { this.particle(heartTex, new THREE.Vector3(m.pos.x, m.pos.y + m.h, m.pos.z), 2, 0.4, 0.8, 1); if (this.sound) playSound(m.type, 0.5); return null; }
       this.particle(puffTex, new THREE.Vector3(m.pos.x, m.pos.y + 0.3, m.pos.z), 6, 0.6, 0.6, 0.7);
       this.remove(m);

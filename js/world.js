@@ -109,7 +109,7 @@ window.VC = window.VC || {};
           } else if (y < h) id = sub;
           else if (y === h) id = surface;
           else if (y <= SEA) id = B.WATER;
-          if (id !== B.AIR && id !== B.WATER && id !== B.BEDROCK && this.isCave(x, y, z, h)) id = B.AIR;
+          if (id !== B.AIR && id !== B.WATER && id !== B.BEDROCK && this.isCave(x, y, z, h)) id = y < 7 ? B.LAVA : B.AIR; // lava lakes at the bottom of deep caves
           d[idx(lx, y, lz)] = id;
         }
         // Ground plants
@@ -210,6 +210,7 @@ window.VC = window.VC || {};
         let e = this.edits.get(c.key); if (!e) { e = new Map(); this.edits.set(c.key, e); }
         e.set(i, id);
         if (this.onEdit) this.onEdit(c);
+        if (this.onSetBlock && old !== id) this.onSetBlock(x, y, z, id, old);
         return true;
       }
       c.urgent = true;
@@ -226,6 +227,7 @@ window.VC = window.VC || {};
       if (!lit) for (let a = -1; a <= 1 && !lit; a++) for (let b = -1; b <= 1; b++) { const n = this.chunks.get((cx + a) + ',' + (cz + b)); if (n && n.emitters.size) { lit = true; break; } }
       if (lit) for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const n = this.chunks.get((cx + a) + ',' + (cz + b)); if (n) n.dirty = true; }
       if (this.onEdit) this.onEdit(c);
+      if (this.onSetBlock && old !== id) this.onSetBlock(x, y, z, id, old);
       return true;
     }
     serialize(extra) {

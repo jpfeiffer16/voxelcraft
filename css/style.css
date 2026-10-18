@@ -129,3 +129,11 @@ html.mobile #hearts canvas { width: 15px; height: 15px; }
 
 .tilt-status { font-size: 12px; line-height: 1.35; margin: 6px auto 4px; padding: 5px 8px; border-radius: 4px; background: rgba(255,255,255,0.07); color: #ddd; max-width: 520px; text-align: left; }
 .tilt-status.ok { color: #9be89b; } .tilt-status.warn { color: #ffd479; } .tilt-status.bad { color: #ff9a8a; }
+
+#lava-overlay { position: fixed; inset: 0; pointer-events: none; background: rgba(230, 90, 10, 0.72); display: none; }
+#burn-overlay { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .3s;
+  background: linear-gradient(to top, rgba(255,120,0,0.55), rgba(255,60,0,0.15) 35%, rgba(0,0,0,0) 60%); animation: burnflick .25s infinite alternate; }
+#burn-overlay.on { opacity: 1; }
+@keyframes burnflick { from { filter: brightness(1); } to { filter: brightness(1.35); } }
+#sleep-overlay { position: fixed; inset: 0; pointer-events: none; background: #000; opacity: 0; transition: opacity .7s; }
+#sleep-overlay.on { opacity: 0.94; }

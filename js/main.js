@@ -83,8 +83,8 @@
   let world = null, player = null;
   let state = 'title'; // title | playing | paused | inventory | dead
   let worldTime = 0.05;
-  let hotbar = [B.GRASS, B.DIRT, B.STONE, B.PLANKS, B.LOG, B.TORCH, B.TNT, B.DOG_EGG, B.LION_EGG];
-  let mobs = null, tnt = null, spawnPoint = null;
+  let hotbar = [B.GRASS, B.PLANKS, B.COBBLE, B.OAK_DOOR_ITEM, B.GLASS_PANE, B.BED_ITEM, B.TORCH, B.TNT, B.LION_EGG];
+  let mobs = null, tnt = null, fluids = null, spawnPoint = null;
   let selected = 0;
   let saveTimer = 0, dirtySave = false;
   const testMode = /[?&]test=1/.test(location.search);
@@ -122,9 +122,10 @@
     pendingMobs = null;
     world = new VC.World(seed);
     if (mobs) mobs.dispose();
-    mobs = new VC.Mobs(scene, world, { max: MOBILE ? 10 : 20, maxWild: MOBILE ? 4 : 6, maxZombies: MOBILE ? 4 : 8, maxWildLions: MOBILE ? 1 : 2 });
+    mobs = new VC.Mobs(scene, world, { max: MOBILE ? 10 : 20, maxWild: MOBILE ? 4 : 6, maxHostile: MOBILE ? 7 : 16, maxWildLions: MOBILE ? 1 : 2, mobile: MOBILE });
+    fluids = new VC.Fluids(world, { maxPerTick: MOBILE ? 48 : 96 });
     mobs.sound = settings.sound; mobs.hostile = settings.hostile !== false;
-    mobs.onPlayerDamage = (amt, m) => { if (!settings.hostile) return; if (player.hurt(amt, m.pos, m, 5)) onHurt(); };
+    mobs.onPlayerDamage = (amt, m) => { if (!settings.hostile) return; player.lastCause = 'mob'; if (player.hurt(amt, m.pos, m, 5)) onHurt(); };
     if (tnt) tnt.dispose();
     tnt = new VC.Explosives(scene, world, tex, { maxPrimed: MOBILE ? 10 : 20, perFrame: MOBILE ? 1 : 2, maxParticles: MOBILE ? 140 : 260 });
     tnt.sound = settings.sound; tnt.onExplode = onExplode; tnt.onBlocksChanged = () => { dirtySave = true; };
@@ -231,7 +232,10 @@
     const sunset = Math.max(0, 1 - Math.abs(elev) / 0.28) * (Math.cos(ang) > -2 ? 1 : 0);
     tmpC.copy(cNight).lerp(cDay, day).lerp(cSunset, sunset * 0.45);
     const R = settings.renderDistance * CS;
-    if (player.headInWater) {
+    if (player.headInLava) {
+      scene.background.setRGB(0.85, 0.3, 0.03); scene.fog.color.copy(scene.background);
+      scene.fog.near = 0.2; scene.fog.far = 3;
+    } else if (player.headInWater) {
       scene.background.copy(cWater).multiplyScalar(0.3 + 0.7 * day); scene.fog.color.copy(scene.background);
       scene.fog.near = 1; scene.fog.far = 24;
     } else {
@@ -411,12 +415,71 @@
   // ---------- block interaction ----------
   let target = null, targetMob = null, lastAttack = 0;
   const MobSounds = VC.MobSounds;
-  function isReplaceable(id) { return id === B.AIR || id === B.WATER || VC.Blocks.RENDER[id] === 4; }
+  function isReplaceable(id) { return id === B.AIR || (id > 0 && VC.Blocks.FLUID[id] > 0) || VC.Blocks.RENDER[id] === 4; }
+  const BL = VC.Blocks, DIRS = BL.DIRS;
+  // the other half of a door / bed
+  function partnerOf(x, y, z, id) {
+    const di = BL.doorInfo(id); if (di) return [x, y + (di.upper ? -1 : 1), z];
+    const bi = BL.bedInfo(id); if (bi) { const [dx, dz] = DIRS[bi.f], s = bi.head ? -1 : 1; return [x + dx * s, y, z + dz * s]; }
+    return null;
+  }
+  function breakPartner(x, y, z, id) {
+    const pp = partnerOf(x, y, z, id); if (!pp) return;
+    const pid = world.getBlock(pp[0], pp[1], pp[2]);
+    if (pid > 0 && BL.defs[pid].item === BL.defs[id].item) world.setBlock(pp[0], pp[1], pp[2], B.AIR);
+  }
+  function toggleDoor(x, y, z, id) {
+    const di = BL.doorInfo(id), ly = di.upper ? y - 1 : y;
+    const open = !di.open;
+    // don't close a door on top of the player
+    if (!open) { const b = BL.shape(BL.doorId(di.base, di.f, false, false))[0], p = player.pos, HW = 0.3;
+      if (p.x + HW > x + b[0] / 16 && p.x - HW < x + b[3] / 16 && p.z + HW > z + b[2] / 16 && p.z - HW < z + b[5] / 16 && p.y + 1.8 > ly && p.y < ly + 2) { toast('Something is in the way'); return; } }
+    world.setBlock(x, ly, z, BL.doorId(di.base, di.f, open, false));
+    if (BL.doorInfo(world.getBlock(x, ly + 1, z))) world.setBlock(x, ly + 1, z, BL.doorId(di.base, di.f, open, true));
+    if (settings.sound) VC.Sound.play(open ? 'door_open' : 'door_close', 0.5);
+    dirtySave = true;
+  }
+  function hostileNear(r) { for (const m of mobs.list) if (m.hostile && m.pos.distanceTo(player.pos) < r) return true; return false; }
+  let sleeping = 0;
+  function useBed(x, y, z, id) {
+    // spawn point: a free spot next to the bed
+    let sp = null;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+      const a = world.getBlock(x + dx, y, z + dz), b = world.getBlock(x + dx, y + 1, z + dz), f = world.getBlock(x + dx, y - 1, z + dz);
+      if (a >= 0 && b >= 0 && !BL.SOLID[a] && !BL.SOLID[b] && !BL.FLUID[a] && BL.SOLID[f]) { sp = [x + dx + 0.5, y + 0.01, z + dz + 0.5]; break; }
+    }
+    spawnPoint = sp || [x + 0.5, y + 0.6, z + 0.5]; dirtySave = true;
+    if (sleeping > 0) return;
+    const night = currentDaylight < 0.45;
+    if (!night) { toast('Spawn point set. You can only sleep at night.'); return; }
+    if (hostileNear(8)) { toast('Spawn point set. You may not rest now — monsters are nearby!'); return; }
+    // sleep: fade out, skip to morning
+    $('sleep-overlay').classList.add('on'); sleeping = performance.now() + 1600;
+    toast('Sleeping… spawn point set.');
+  }
+  function finishSleep() {
+    worldTime = Math.floor(worldTime) + 1 + 0.02; // next morning (06:30)
+    for (const m of [...mobs.list]) if (m.hostile && m.burns && m.pos.distanceTo(player.pos) < 48) mobs.remove(m);
+    $('sleep-overlay').classList.remove('on');
+    player.health = Math.min(player.maxHealth, player.health + 6); updateHearts(true);
+    toast('Good morning!'); dirtySave = true;
+  }
+  // scoop up a fluid source along the view ray
+  function scoopFluid() {
+    const o = camera.position, dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    for (let t = 0.3; t < 5.5; t += 0.1) {
+      const x = Math.floor(o.x + dir.x * t), y = Math.floor(o.y + dir.y * t), z = Math.floor(o.z + dir.z * t), id = world.getBlock(x, y, z);
+      if (id > 0 && BL.FLUID[id]) { if (BL.LEVEL[id] < 8) continue; world.setBlock(x, y, z, B.AIR); return BL.FLUID[id]; }
+      if (id > 0 && BL.SOLID[id]) break;
+    }
+    return 0;
+  }
   const WALL_TORCH = { '1,0': B.TORCH_PX, '-1,0': B.TORCH_NX, '0,1': B.TORCH_PZ, '0,-1': B.TORCH_NZ };
   function removeUnsupported(x, y, z) {
     // plants and floor torches above, wall torches attached to the sides
     const above = world.getBlock(x, y + 1, z);
     if (VC.Blocks.RENDER[above] === 4 || above === B.TORCH) world.setBlock(x, y + 1, z, B.AIR);
+    const ad = BL.doorInfo(above); if (ad && !ad.upper) { world.setBlock(x, y + 1, z, B.AIR); breakPartner(x, y + 1, z, above); } // door lost its floor
     for (const [dx, dz, id] of [[1, 0, B.TORCH_PX], [-1, 0, B.TORCH_NX], [0, 1, B.TORCH_PZ], [0, -1, B.TORCH_NZ]])
       if (world.getBlock(x + dx, y, z + dz) === id) world.setBlock(x + dx, y, z + dz, B.AIR);
   }
@@ -426,17 +489,23 @@
       const msg = mobs.hit(targetMob, player.pos); if (msg) toast(msg); targetMob = null; dirtySave = true; return;
     }
     if (!target || target.id === B.BEDROCK) return;
+    const bid = target.id;
     world.setBlock(target.x, target.y, target.z, B.AIR);
+    breakPartner(target.x, target.y, target.z, bid);
     removeUnsupported(target.x, target.y, target.z);
-    // fill from adjacent water so oceans don't get dry holes
-    const adjW = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]].some(([a, b, c]) => world.getBlock(target.x + a, target.y + b, target.z + c) === B.WATER);
-    if (adjW) world.setBlock(target.x, target.y, target.z, B.WATER);
+    // nearby water / lava flows into the hole by itself (fluid simulation)
     target = null;
   }
   function placeBlock() {
     if (MobSounds) MobSounds.unlock();
     if (targetMob) { const msg = mobs.interact(targetMob); if (msg) toast(msg); dirtySave = true; return; }
     if (!target) return;
+    const held = defs[hotbar[selected]];
+    if (held && held.places === 'bucket') { const k = scoopFluid(); toast(k === 1 ? 'Scooped up water' : k === 2 ? 'Scooped up lava' : 'Aim at a water or lava source'); return; }
+    if (!player.keys.ShiftLeft) {
+      if (BL.doorInfo(target.id)) { toggleDoor(target.x, target.y, target.z, target.id); return; }
+      if (BL.bedInfo(target.id)) { useBed(target.x, target.y, target.z, target.id); return; }
+    }
     if (target.id === B.TNT && !player.keys.ShiftLeft) { // right-click / tap lights TNT (Shift+click places against it)
       if (tnt.ignite(target.x, target.y, target.z)) { toast('TNT lit — run!'); dirtySave = true; } else toast('Too much TNT already burning');
       mouse.timer = 0.4; return;
@@ -450,10 +519,30 @@
     const cur = world.getBlock(x, y, z);
     if (!isReplaceable(cur)) return;
     if (d.egg) {
-      const m = mobs.spawn(d.egg, x + 0.5, y + 0.01, z + 0.5, { yaw: player.yaw + Math.PI });
-      if (!m) toast('Too many animals (max ' + mobs.max + ')'); else { toast(mobs.name(m) + ' spawned — ' + (touchOn() ? 'tap' : 'right-click') + ' it to tame'); dirtySave = true; }
+      const hostileEgg = VC.MOB_TYPES[d.egg] && VC.MOB_TYPES[d.egg].hostile;
+      if (hostileEgg && !settings.hostile) { toast('Hostile mobs are off (pause menu)'); return; }
+      const m = mobs.spawn(d.egg, x + 0.5, y + 0.01, z + 0.5, { yaw: player.yaw + Math.PI, wild: hostileEgg });
+      if (!m) toast(hostileEgg ? 'Too many monsters (max ' + mobs.maxHostile + ')' : 'Too many animals (max ' + mobs.max + ')');
+      else { toast(mobs.name(m) + ' spawned' + (hostileEgg ? ' — watch out!' : ' — ' + (touchOn() ? 'tap' : 'right-click') + ' it to tame')); dirtySave = true; }
       return;
     }
+    const free = (xx, yy, zz) => { const c = world.getBlock(xx, yy, zz); return c >= 0 && isReplaceable(c); };
+    const support = (xx, yy, zz) => { const c = world.getBlock(xx, yy, zz); return c > 0 && BL.SOLID[c] && !BL.defs[c].shape; };
+    if (d.places === 'door') {
+      const f = BL.facingFromYaw(player.yaw);
+      if (!free(x, y + 1, z) || !support(x, y - 1, z)) { toast('A door needs 2 free blocks on solid ground'); return; }
+      if (player.intersectsBlock(x, y, z) || player.intersectsBlock(x, y + 1, z)) return;
+      world.setBlock(x, y, z, BL.doorId(d.base, f, false, false)); world.setBlock(x, y + 1, z, BL.doorId(d.base, f, false, true));
+      dirtySave = true; return;
+    }
+    if (d.places === 'bed') {
+      const f = BL.facingFromYaw(player.yaw), [dx, dz] = DIRS[f];
+      if (!free(x + dx, y, z + dz) || !support(x, y - 1, z) || !support(x + dx, y - 1, z + dz)) { toast('A bed needs 2 free blocks on solid ground'); return; }
+      if (player.intersectsBlock(x, y, z) || player.intersectsBlock(x + dx, y, z + dz)) return;
+      world.setBlock(x, y, z, B.BED + f * 2); world.setBlock(x + dx, y, z + dz, B.BED + f * 2 + 1);
+      dirtySave = true; return;
+    }
+    if (d.places === 'fluid') { world.setBlock(x, y, z, d.fluidBlock); dirtySave = true; return; }
     if (id === B.TORCH) {
       const support = onPlant ? world.getBlock(x, y - 1, z) : target.id;
       if (!VC.Blocks.SOLID[support] || VC.Blocks.RENDER[support] === 5) return;
@@ -500,7 +589,7 @@
     }
     el.classList.toggle('low', h > 0 && h <= 6);
   }
-  let hurtTimer = 0;
+  let hurtTimer = 0, lavaT = 0, burnTick = 1;
   function onHurt() {
     hurtTimer = 0.25; $('hurt-overlay').classList.add('on');
     if (settings.sound) VC.Sound.play('hurt', 0.6);
@@ -513,7 +602,7 @@
     player.shake = Math.max(player.shake, Math.max(0, 1 - d / (r * 8)) * 0.9);
     if (d < R2 && state !== 'title') {
       const f = 1 - d / R2;
-      player.invuln = 0;
+      player.invuln = 0; player.lastCause = 'tnt';
       if (player.hurt(Math.ceil(f * 18), c, null, 4 + f * 14)) onHurt();
     }
     for (const m of [...mobs.list]) {
@@ -521,6 +610,7 @@
       if (md < R2) { const f = 1 - md / R2; mobs.damage(m, Math.ceil(f * (m.tamed ? 9 : 18)), c, 'tnt'); if (!m.dead) { m.vel.y = 4 + f * 8; } }
     }
   }
+  function spawnPointIsBed() { if (!spawnPoint) return false; const [x, y, z] = spawnPoint; for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = -1; dy <= 0; dy++) if (BL.bedInfo(world.getBlock(Math.floor(x) + dx, Math.floor(y) + dy, Math.floor(z) + dz))) return true; return false; }
   function respawn(silent) {
     if (!player.dead && silent !== true) { play(); return; }
     const [x, y, z] = spawnPoint || findSpawn(world.gen);
@@ -529,7 +619,7 @@
     let sy = Math.floor(y);
     const c = world.getChunk(Math.floor(bx / CS), Math.floor(bz / CS));
     if (c) { while (sy < CH - 2 && (VC.Blocks.SOLID[world.getBlock(bx, sy, bz)] || VC.Blocks.SOLID[world.getBlock(bx, sy + 1, bz)])) sy++; }
-    player.respawn(x, sy + 0.01, z);
+    player.respawn(x, sy + 0.01, z); player.burnT = 0; player.lastCause = null;
     for (const m of [...mobs.list]) if (m.hostile && Math.hypot(m.pos.x - x, m.pos.z - z) < 24) mobs.remove(m);
     updateHearts(true);
     dirtySave = true;
@@ -551,7 +641,7 @@
       `Chunk: ${Math.floor(p.x / CS)}, ${Math.floor(p.z / CS)}   Facing: ${facing}\n` +
       `Chunks: ${meshed} rendered / ${world.chunks.size} loaded  (RD ${settings.renderDistance})\n` +
       `Time: ${timeString()}   Mode: ${player.flying ? 'flying' : player.inWater ? 'swimming' : 'walking'}\n` +
-      `Target: ${targetMob ? (targetMob.tamed ? 'Tamed ' : '') + targetMob.type : tgt}   Animals: ${mobs.animals()}/${mobs.max}  Zombies: ${mobs.zombies()}  TNT: ${tnt.count}\n` +
+      `Target: ${targetMob ? (targetMob.tamed ? 'Tamed ' : '') + targetMob.type : tgt}   Animals: ${mobs.animals()}/${mobs.max}  Hostile: ${mobs.hostiles()}/${mobs.maxHostile}  TNT: ${tnt.count}  Fluid queue: ${fluids.pending}\n` +
       `Draw calls: ${renderer.info.render.calls}  Tris: ${(renderer.info.render.triangles / 1000).toFixed(0)}k`;
   }
 
@@ -580,10 +670,23 @@
       mobs.update(dt, player, currentDaylight);
       tnt.daylight = currentDaylight; tnt.listener = player.pos;
       tnt.update(dt);
+      fluids.update(dt);
+      // lava burns; water puts the fire out
+      if (!player.dead) {
+        if (player.inLava) { player.burnT = 4; lavaT -= dt; if (lavaT <= 0) { lavaT = 0.5; player.invuln = 0; player.lastCause = 'lava'; if (player.hurt(3, null, null)) onHurt(); } }
+        else if (player.burnT > 0) {
+          if (player.inWater) player.burnT = 0;
+          else { player.burnT -= dt; burnTick -= dt; if (burnTick <= 0) { burnTick = 1; player.lastCause = 'fire'; if (player.hurt(1, null, null)) onHurt(); } }
+        }
+      }
+      $('burn-overlay').classList.toggle('on', !player.dead && (player.inLava || player.burnT > 0));
+      $('lava-overlay').style.display = player.headInLava ? 'block' : 'none';
+      if (sleeping > 0 && performance.now() >= sleeping) { sleeping = 0; finishSleep(); }
       updateHearts();
       if (player.dead) { // death screen
         setState('dead'); if (document.pointerLockElement) document.exitPointerLock();
-        $('dead-msg').textContent = (player.lastAttacker && !player.lastAttacker.dead ? 'Slain by a ' + mobs.name(player.lastAttacker).toLowerCase() + '. ' : 'Blown up! ') + 'Your world is safe — respawn at the spawn point.';
+        const la = player.lastAttacker, cause = player.lastCause;
+        $('dead-msg').textContent = (cause === 'lava' ? 'Tried to swim in lava. ' : cause === 'fire' ? 'Burned to death. ' : cause === 'mob' && la ? 'Slain by a ' + mobs.name(la).toLowerCase() + '. ' : 'Blown up! ') + 'Your world is safe — respawn at your ' + (spawnPointIsBed() ? 'bed.' : 'spawn point.');
         toast('');
       }
       if (pendingMobs) { const c = world.getChunk(Math.floor(player.pos.x / CS), Math.floor(player.pos.z / CS)); if (c && c.meshes && !player.frozen) { mobs.load(pendingMobs); pendingMobs = null; } }
@@ -615,5 +718,5 @@
   requestAnimationFrame(frame);
 
   // Expose for debugging / automated tests
-  window.game = { perf, get isMobile() { return touchOn(); }, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => { player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; }, get tnt() { return tnt; }, setHostile, respawn, onExplode, get spawnPoint() { return spawnPoint; } };
+  window.game = { perf, get isMobile() { return touchOn(); }, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => { player.toggleFly(); toast(player.flying ? 'Flying enabled' : 'Flying disabled'); }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; }, get tnt() { return tnt; }, get fluids() { return fluids; }, useBed, toggleDoor, scoopFluid, get worldTime() { return worldTime; }, get sleeping() { return sleeping; }, setHostile, respawn, onExplode, get spawnPoint() { return spawnPoint; } };
 })();

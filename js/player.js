@@ -41,13 +41,8 @@ window.VC = window.VC || {};
       const id = this.world.getBlock(x, y, z);
       return id === -1 ? true : SOLID[id] === 1; // unloaded chunks act solid
     }
-    collides(px, py, pz) {
-      const x0 = Math.floor(px - HW), x1 = Math.floor(px + HW - 1e-7);
-      const y0 = Math.floor(py), y1 = Math.floor(py + HEIGHT - 1e-7);
-      const z0 = Math.floor(pz - HW), z1 = Math.floor(pz + HW - 1e-7);
-      for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) if (this.isSolidAt(x, y, z)) return true;
-      return false;
-    }
+    // Returns null or the bounds of what we overlap (blocks, door panels, panes, beds)
+    collides(px, py, pz) { return VC.Blocks.aabbHit(this.world, px - HW, py, pz - HW, px + HW, py + HEIGHT, pz + HW); }
     // Move along one axis, resolving collisions. Returns true if blocked.
     moveAxis(axis, amount) {
       const p = this.pos;
@@ -56,18 +51,13 @@ window.VC = window.VC || {};
       for (let s = 0; s < steps; s++) {
         const before = p.getComponent(axis);
         p.setComponent(axis, before + d);
-        if (this.collides(p.x, p.y, p.z)) {
-          // snap to the block boundary
-          if (axis === 1) {
-            p.y = d > 0 ? Math.floor(p.y + HEIGHT) - HEIGHT - 1e-4 : Math.floor(p.y) + 1 + 1e-4;
-            if (this.collides(p.x, p.y, p.z)) p.y = before;
-          } else {
-            const half = HW;
-            const v = p.getComponent(axis);
-            const snapped = d > 0 ? Math.floor(v + half) - half - 1e-4 : Math.floor(v - half) + 1 + half + 1e-4;
-            p.setComponent(axis, snapped);
-            if (this.collides(p.x, p.y, p.z)) p.setComponent(axis, before);
-          }
+        const hit = this.collides(p.x, p.y, p.z);
+        if (hit) {
+          // snap against the surface we hit (works for partial boxes like doors and beds too)
+          if (axis === 1) p.y = d > 0 ? hit.minY - HEIGHT - 1e-4 : hit.maxY + 1e-4;
+          else if (axis === 0) p.x = d > 0 ? hit.minX - HW - 1e-4 : hit.maxX + HW + 1e-4;
+          else p.z = d > 0 ? hit.minZ - HW - 1e-4 : hit.maxZ + HW + 1e-4;
+          if (Math.abs(p.getComponent(axis) - before) > Math.abs(d) + 1e-3 || this.collides(p.x, p.y, p.z)) p.setComponent(axis, before);
           return true;
         }
       }
@@ -83,7 +73,9 @@ window.VC = window.VC || {};
       const w = this.world;
       const feetId = w.getBlock(Math.floor(this.pos.x), Math.floor(this.pos.y + 0.4), Math.floor(this.pos.z));
       const headId = w.getBlock(Math.floor(this.pos.x), Math.floor(this.pos.y + EYE), Math.floor(this.pos.z));
-      this.inWater = feetId === B.WATER; this.headInWater = headId === B.WATER;
+      const FL = VC.Blocks.FLUID;
+      this.inWater = feetId > 0 && FL[feetId] === 1; this.headInWater = headId > 0 && FL[headId] === 1;
+      this.inLava = (feetId > 0 && FL[feetId] === 2) || (headId > 0 && FL[headId] === 2); this.headInLava = headId > 0 && FL[headId] === 2;
       if (this.frozen) {
         const c = w.getChunk(Math.floor(this.pos.x / 16), Math.floor(this.pos.z / 16));
         if (c && c.meshes) this.frozen = false; else { this.updateCamera(0); return; }
@@ -98,6 +90,7 @@ window.VC = window.VC || {};
       const sprint = k.ShiftLeft && !this.flying || k.ControlLeft || k.ControlRight || k.ShiftRight || this.touchSprint;
       let speed = this.flying ? (sprint ? 22 : 11) : sprint && fwd > 0 ? 5.8 : 4.3;
       if (this.inWater && !this.flying) speed *= 0.55;
+      if (this.inLava && !this.flying) speed *= 0.3;
       const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
       let mx = -sin * fwd + cos * strafe, mz = -cos * fwd - sin * strafe;
       const ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
@@ -109,6 +102,10 @@ window.VC = window.VC || {};
       if (this.flying) {
         const up = (k.Space ? 1 : 0) - (k.ShiftLeft ? 1 : 0);
         this.vel.y += (up * speed * 0.8 - this.vel.y) * Math.min(1, 10 * dt);
+      } else if (this.inLava) { // thick: sink slowly, swim up slowly
+        this.vel.y -= 6 * dt; this.vel.y *= Math.pow(0.05, dt);
+        if (k.Space) this.vel.y = Math.min(this.vel.y + 20 * dt, 2.0);
+        this.vel.y = Math.max(this.vel.y, -2);
       } else if (this.inWater) {
         this.vel.y -= 9 * dt;
         this.vel.y *= Math.pow(0.12, dt);
@@ -158,7 +155,7 @@ window.VC = window.VC || {};
       let nx = 0, ny = 0, nz = 0, t = 0;
       while (t <= maxDist) {
         const id = this.world.getBlock(x, y, z);
-        if (id > 0 && id !== B.WATER) return { x, y, z, nx, ny, nz, id, t };
+        if (id > 0 && !VC.Blocks.FLUID[id]) return { x, y, z, nx, ny, nz, id, t };
         if (tmx < tmy && tmx < tmz) { x += sx; t = tmx; tmx += tdx; nx = -sx; ny = 0; nz = 0; }
         else if (tmy < tmz) { y += sy; t = tmy; tmy += tdy; nx = 0; ny = -sy; nz = 0; }
         else { z += sz; t = tmz; tmz += tdz; nx = 0; ny = 0; nz = -sz; }

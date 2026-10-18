@@ -18,6 +18,9 @@
 <div id="crosshair"></div>
 <div id="hud" class="hidden"><div id="debug"></div></div>
 <div id="hurt-overlay"></div>
+<div id="lava-overlay"></div>
+<div id="burn-overlay"></div>
+<div id="sleep-overlay"></div>
 <div id="toast"></div>
 <div id="hearts" class="hidden"></div>
 <div id="hotbar"></div>
@@ -57,19 +60,20 @@
     <div class="tilt-status tilt-only mobile-only" id="tilt-status-start"></div>
     <div class="controls mobile-only">
       <div><b>Left thumb</b> drag to move</div><div><b>Right side</b> drag to look</div>
-      <div><b>Tap</b> place / tame / light TNT</div><div><b>Hold</b> break block / attack</div>
+      <div><b>Tap</b> place / tame / TNT / door / bed</div><div><b>Hold</b> break block / attack</div>
       <div><b>▲</b> jump / swim / fly up</div><div><b>✈</b> fly · <b>»</b> sprint</div>
       <div class="tilt-only"><b>Tilt phone</b> to aim (📱 toggle)</div><div><b>◎</b> recenter · <b>☰</b> menu</div>
-      <div><b>Hotbar</b> tap to select</div><div><b>⋯</b> TNT, torches, pets, blocks</div>
+      <div><b>Hotbar</b> tap to select</div><div><b>⋯</b> doors, beds, glass, buckets, eggs…</div>
     </div>
     <div class="controls desktop-only">
       <div><b>Mouse</b> look</div><div><b>W A S D</b> move</div>
       <div><b>Space</b> jump / swim</div><div><b>Shift</b> sprint (fly: down)</div>
       <div><b>F</b> or <b>double-tap Space</b> fly</div><div><b>Ctrl</b> fast fly</div>
-      <div><b>Left click</b> break / attack</div><div><b>Right click</b> place / light TNT</div>
+      <div><b>Left click</b> break / attack</div><div><b>Right click</b> place / TNT / open door / sleep</div>
       <div><b>Right click pet</b> tame / sit / follow (lions guard you)</div><div><b>1–9 / wheel</b> hotbar</div>
       <div><b>E</b> block menu (TNT, torches, pets…)</div><div><b>F3</b> debug · <b>T</b> touch controls</div>
-      <div><b>Esc</b> pause / settings</div><div><b>Middle click</b> pick block</div>
+      <div><b>Shift + right click</b> place against a door / bed</div><div><b>Middle click</b> pick block</div>
+      <div><b>Esc</b> pause / settings</div><div><b>Bucket</b> right click a source to scoop</div>
     </div>
   </div>
 </div>
@@ -108,7 +112,7 @@
 
 <div id="inventory" class="overlay hidden">
   <div class="panel wide">
-    <div class="inv-head"><h2>Blocks, TNT &amp; Pets</h2><button id="btn-inv-close">Done</button></div>
+    <div class="inv-head"><h2>Blocks, Items &amp; Mobs</h2><button id="btn-inv-close">Done</button></div>
     <p class="sub">Click a block to put it in the selected hotbar slot. Press E to close.</p>
     <div id="inv-grid"></div>
     <div class="row"><button id="btn-inv-done">Done</button></div>
@@ -123,6 +127,7 @@
 <script src="js/blocks.js"></script>
 <script src="js/textures.js"></script>
 <script src="js/world.js"></script>
+<script src="js/fluids.js"></script>
 <script src="js/mesher.js"></script>
 <script src="js/player.js"></script>
 <script src="js/mobs.js"></script>

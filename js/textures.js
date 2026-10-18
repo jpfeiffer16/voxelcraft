@@ -208,6 +208,82 @@ window.VC = window.VC || {};
   };
   P[T.tnt_top] = (t) => { t.fill([200, 195, 190], 8); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (x === 0 || y === 0 || x === 15 || y === 15) t.set(x, y, [170, 40, 30]); for (let y = 6; y < 10; y++) for (let x = 6; x < 10; x++) t.set(x, y, [60, 55, 50]); t.set(7, 5, [120, 110, 90]); t.set(8, 4, [120, 110, 90]); };
   P[T.tnt_bottom] = (t) => { t.fill([185, 180, 175], 8); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (x === 0 || y === 0 || x === 15 || y === 15) t.set(x, y, [170, 40, 30]); };
+  // ---- windows
+  P[T.pane] = (t) => {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) t.set(x, y, [200, 225, 235], 60);
+    for (let i = 0; i < 16; i++) { t.set(i, 0, [215, 230, 236]); t.set(i, 15, [185, 205, 215]); }
+    for (let i = 0; i < 5; i++) { t.set(3 + i, 6 - i, [240, 248, 252], 210); t.set(4 + i, 6 - i, [240, 248, 252], 150); t.set(9 + i, 13 - i, [240, 248, 252], 170); }
+  };
+  P[T.oak_window] = (t) => {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) t.set(x, y, [0, 0, 0], 0);
+    const wood = (x, y) => t.set(x, y, t.vary([150, 112, 64], 8));
+    for (let i = 0; i < 16; i++) { wood(i, 0); wood(i, 15); wood(0, i); wood(15, i); wood(i, 7); wood(i, 8); wood(7, i); wood(8, i); }
+    for (const [ox, oy] of [[1, 1], [9, 1], [1, 9], [9, 9]]) { t.set(ox + 1, oy + 3, [240, 248, 252], 220); t.set(ox + 2, oy + 2, [240, 248, 252], 220); t.set(ox + 3, oy + 1, [240, 248, 252], 200); }
+  };
+  const stained = (c) => (t) => {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) t.set(x, y, t.vary(c, 6));
+    for (let i = 0; i < 16; i++) { t.set(i, 0, [c[0] * 0.7, c[1] * 0.7, c[2] * 0.7]); t.set(i, 15, [c[0] * 0.7, c[1] * 0.7, c[2] * 0.7]); t.set(0, i, [c[0] * 0.7, c[1] * 0.7, c[2] * 0.7]); t.set(15, i, [c[0] * 0.7, c[1] * 0.7, c[2] * 0.7]); }
+    for (let i = 0; i < 4; i++) t.set(3 + i, 5 - i, [Math.min(255, c[0] + 80), Math.min(255, c[1] + 80), Math.min(255, c[2] + 80)]);
+  };
+  P[T.stained_blue] = stained([60, 110, 220]);
+  P[T.stained_amber] = stained([230, 150, 40]);
+  // ---- fluids
+  P[T.lava] = (t) => {
+    t.fill([215, 85, 20], 14);
+    for (let i = 0; i < 26; i++) { const x = (t.rnd() * 16) | 0, y = (t.rnd() * 16) | 0; t.set(x, y, t.vary([255, 190, 60], 12)); t.set(x + 1, y, t.vary([250, 150, 40], 10)); }
+    for (let i = 0; i < 10; i++) { const x = (t.rnd() * 16) | 0, y = (t.rnd() * 16) | 0; t.set(x, y, [150, 40, 15]); }
+  };
+  // ---- doors
+  function doorHalf(top, iron) {
+    return (t) => {
+      const base = iron ? [200, 200, 205] : [160, 122, 70], dark = iron ? [150, 150, 158] : [112, 82, 45];
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) t.set(x, y, t.vary(base, iron ? 5 : 8));
+      for (let i = 0; i < 16; i++) { t.set(0, i, dark); t.set(15, i, dark); }
+      if (top) { for (let i = 0; i < 16; i++) t.set(i, 0, dark);
+        // window: 2x2 panes
+        for (let y = 2; y < 8; y++) for (let x = 2; x < 14; x++) if (x !== 7 && x !== 8) t.set(x, y, [0, 0, 0], 0);
+        for (let y = 10; y < 14; y++) for (let x = 3; x < 13; x++) if (y === 10 || y === 13 || x === 3 || x === 12) t.set(x, y, dark);
+      } else {
+        for (let i = 0; i < 16; i++) t.set(i, 15, dark);
+        for (let y = 2; y < 13; y++) for (let x = 3; x < 13; x++) if (y === 2 || y === 12 || x === 3 || x === 12 || (y === 7 && !iron)) t.set(x, y, dark);
+        t.set(12, 0, [60, 60, 60]); t.set(13, 0, [60, 60, 60]); t.set(13, 1, [40, 40, 40]); // handle
+        if (iron) for (let y = 4; y < 11; y += 3) for (let x = 5; x < 11; x += 2) t.set(x, y, [170, 170, 176]);
+      }
+    };
+  }
+  P[T.door_oak_bottom] = doorHalf(false, false); P[T.door_oak_top] = doorHalf(true, false);
+  P[T.door_iron_bottom] = doorHalf(false, true); P[T.door_iron_top] = doorHalf(true, true);
+  const icon2 = (topTile, botTile) => (t) => { // tall item icon from two door halves, squeezed
+    clear(t); const a = makeTile(P[topTile], topTile + 1), b = makeTile(P[botTile], botTile + 1);
+    for (let y = 0; y < 16; y++) for (let x = 4; x < 12; x++) { const src = y < 8 ? a : b, sy = (y % 8) * 2, sx = (x - 4) * 2, i = (sy * 16 + sx) * 4; t.set(x, y, [src.data[i], src.data[i + 1], src.data[i + 2]], src.data[i + 3]); }
+  };
+  P[T.door_item] = icon2(T.door_oak_top, T.door_oak_bottom);
+  P[T.iron_door_item] = icon2(T.door_iron_top, T.door_iron_bottom);
+  // ---- beds (top tiles: head end of the bed is at canvas top, row 0)
+  const RED = [175, 35, 35], RED2 = [145, 25, 25];
+  P[T.bed_foot_top] = (t) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) t.set(x, y, t.vary(x === 0 || x === 15 || y === 15 ? RED2 : RED, 6)); for (let x = 1; x < 15; x += 3) t.set(x, 6, RED2); };
+  P[T.bed_head_top] = (t) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) t.set(x, y, t.vary(x === 0 || x === 15 ? RED2 : RED, 6)); for (let y = 1; y < 7; y++) for (let x = 2; x < 14; x++) t.set(x, y, t.vary(y === 6 ? [205, 205, 210] : [240, 240, 244], 4)); for (let x = 0; x < 16; x++) t.set(x, 8, RED2); };
+  P[T.bed_side] = (t) => { clear(t); for (let y = 7; y < 16; y++) for (let x = 0; x < 16; x++) t.set(x, y, t.vary(y < 10 ? RED : y < 13 ? [235, 235, 238] : [130, 98, 58], 6)); };
+  P[T.bed_end] = P[T.bed_side];
+  P[T.bed_item] = (t) => { clear(t); for (let y = 6; y < 12; y++) for (let x = 1; x < 15; x++) t.set(x, y, t.vary(x < 5 ? [240, 240, 244] : RED, 5)); for (let y = 12; y < 14; y++) for (let x = 1; x < 15; x++) if (x < 3 || x > 12 || y === 12) t.set(x, y, [130, 98, 58]); };
+  // ---- buckets
+  function bucket(fill) {
+    return (t) => {
+      clear(t);
+      const metal = [175, 178, 185], dark = [110, 112, 120];
+      for (let y = 5; y < 14; y++) { const w = 6 - Math.floor((y - 5) / 3); for (let x = 8 - w; x < 8 + w; x++) t.set(x, y, x === 8 - w || x === 8 + w - 1 || y === 13 ? dark : metal); }
+      for (let x = 3; x < 13; x++) t.set(x, 5, dark);
+      for (let i = 0; i < 6; i++) { t.set(3 + i, 4 - Math.min(i, 5 - i) * 0.6 | 0, dark); t.set(12 - i, 4 - Math.min(i, 5 - i) * 0.6 | 0, dark); }
+      t.set(4, 2, dark); t.set(11, 2, dark); for (let x = 5; x < 11; x++) t.set(x, 1, dark);
+      if (fill) for (let x = 3; x < 13; x++) { t.set(x, 6, fill); if (x > 3 && x < 12) t.set(x, 7, fill); }
+    };
+  }
+  P[T.bucket] = bucket(null); P[T.water_bucket] = bucket([50, 100, 215]); P[T.lava_bucket] = bucket([235, 110, 25]);
+  P[T.wolf_egg] = egg([200, 200, 200], [110, 110, 115]);
+  P[T.bear_egg] = egg([120, 80, 45], [60, 38, 22]);
+  P[T.spider_egg] = egg([60, 50, 50], [190, 20, 20]);
+  P[T.croc_egg] = egg([80, 130, 60], [40, 70, 30]);
+  P[T.zombie_egg] = egg([45, 140, 140], [90, 160, 70]);
   P[T.lion_egg] = egg([215, 170, 90], [120, 70, 25]);
   P[T.dog_egg] = egg([225, 205, 170], [130, 85, 50]);
   P[T.cat_egg] = egg([240, 160, 70], [60, 45, 40]);

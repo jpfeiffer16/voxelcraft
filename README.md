@@ -59,6 +59,47 @@ Mobile defaults: render distance 4, pixel ratio 1.
 - **Health**: you have 10 hearts. They regenerate slowly after a few seconds without damage. When you die, a respawn
   screen appears and you come back at the world spawn point. The world is kept.
 
+## Predators, beds, doors, windows, water & lava
+
+![Predators: wolves, bears, a spider, a crocodile and zombies](screenshot-predators.png)
+![A house with a bed, doors, windows and stained glass](screenshot-house.png)
+![The house from outside: oak door and glass panes](screenshot-house-outside.png)
+![Water and lava flowing; cobblestone and obsidian where they meet](screenshot-fluids.png)
+
+- **Predators** (all hostile; switching **Hostile mobs** off in the pause menu removes them and stops them spawning):
+  - **Wolves** hunt in packs of 2–3 in forests at night. They stalk you slowly, then rush in (3 damage a bite, 6 hearts of
+    health).
+  - **Bears** (brown, black, or polar on snow) live in forests and snowy areas, by day too. They are slow but hit hard
+    (6 damage, 17 hearts).
+  - **Spiders** come out at night and in caves. They climb walls and leap at you (2 damage).
+  - **Crocodiles** lurk at the water's edge and swim fast (5 damage).
+  - Each predator has its own blocky model, animation and sound. Tamed **lions and dogs** attack predators that come near
+    you, and anything that hurts you. Tamed animals slowly heal.
+  - Every predator (and the zombie) has a **spawn egg** in the block menu, so you can test them. The eggs do nothing while
+    hostile mobs are off.
+- **More zombies**: they spawn more often at night and in caves, sometimes in small hordes. At most 16 hostile mobs are
+  around at once (7 on mobile). Torches still keep monsters from spawning (block light 7 or more).
+- **Beds**: place one and it lies along the way you're facing (2 blocks). Right-click / tap it to set your **spawn
+  point** next to the bed. At night you can **sleep**: the screen fades and it becomes morning. You can't sleep if a
+  monster is within 8 blocks.
+- **Doors**: oak and iron doors are 2 tall and face away from you when placed. Right-click / tap to open or close one.
+  A closed door blocks you and mobs; an open one swings against the side of its block. A door won't close on you.
+  Breaking either half breaks the whole door, and so does breaking the block under it. Door states are saved.
+- **Windows**: **glass panes** are thin and join up with each other and with walls. There are also **oak-frame
+  windows** and **blue / amber stained glass**. They all render as see-through.
+- **Water & lava**:
+  - Use the **water bucket** and **lava bucket** to place a source block. The empty **bucket** scoops up a source.
+  - Both flow down and a few blocks sideways (water 3 blocks, lava 2), and dry up when their source is gone.
+  - Water meeting a lava source makes **obsidian**; water meeting flowing lava makes **cobblestone**.
+  - Lava glows, slows you down, burns you (3 damage every half second, then you keep burning for a few seconds unless
+    you jump in water), and also hurts mobs.
+  - Deep caves now have lava lakes at the bottom.
+  - The flowing is calculated in small batches, a few times a second (fewer blocks per update on mobile), so it never
+    stalls the game.
+- **New-world hotbar**: grass, planks, cobblestone, oak door, glass pane, bed, torch, TNT and lion egg. Everything else is
+  in the block menu (**E**, or **⋯** on touch). **Shift + right-click** places a block against a door or bed instead of
+  using it.
+
 ### Tilt look troubleshooting
 
 The pause menu has a **Tilt status** line. It says whether permission was granted or denied, whether the game is still

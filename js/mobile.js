@@ -343,6 +343,6 @@
 if (window.game && window.game.onState) window.game.onState(window.game.state);
 (function () {
   const s = document.querySelector('#inventory .sub'); if (!s) return;
-  const upd = () => { s.textContent = VC.isMobile ? 'Tap a block, torch or spawn egg to put it in the selected hotbar slot.' : 'Click a block to put it in the selected hotbar slot. Press E to close.'; };
+  const upd = () => { s.textContent = VC.isMobile ? 'Tap a block, item or spawn egg to put it in the selected hotbar slot.' : 'Click a block to put it in the selected hotbar slot. Press E to close.'; };
   upd(); window.addEventListener('vc-touchmode', upd);
 })();

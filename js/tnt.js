@@ -84,7 +84,7 @@ window.VC = window.VC || {};
     explode(c) {
       const w = this.world, cx = Math.floor(c.x), cy = Math.floor(c.y + 0.5), cz = Math.floor(c.z);
       const r = 3.6 + Math.random() * 1.2, R = Math.ceil(r + 1);
-      const inWater = w.getBlock(cx, cy, cz) === B.WATER || w.getBlock(cx, cy + 1, cz) === B.WATER;
+      const inWater = VC.Blocks.FLUID[Math.max(0, w.getBlock(cx, cy, cz))] === 1 || VC.Blocks.FLUID[Math.max(0, w.getBlock(cx, cy + 1, cz))] === 1;
       this.exploded++;
       let changed = 0;
       if (!inWater) {
@@ -98,7 +98,7 @@ window.VC = window.VC || {};
           if (id === B.TNT) { this.ignite(x, y, z, 0.4 + Math.random() * 0.8, true); continue; } // chain reaction (reliable, ignores the ragged edge)
           const lim = r * (0.78 + 0.32 * VC.Noise.hash3(x, y, z, seed | 0)); // ragged crater edge
           if (d > lim) continue;
-          if (id <= 0 || id === B.BEDROCK || id === B.WATER) continue;
+          if (id <= 0 || id === B.BEDROCK || VC.Blocks.FLUID[id]) continue;
           if ((id === B.OBSIDIAN) && d > 1.2) continue; // blast resistant
           w.setBlock(x, y, z, B.AIR, true); changed++;
         }
@@ -109,7 +109,7 @@ window.VC = window.VC || {};
           const d = defs[id];
           if (RENDER[id] === 4 || id === B.TORCH) { const below = w.getBlock(x, y - 1, z); if (below === 0 || !SOLID[below]) { w.setBlock(x, y, z, B.AIR, true); changed++; } }
           else if (d && d.wall) { const s = w.getBlock(x - d.wall[0], y, z - d.wall[1]); if (s === 0 || !SOLID[s]) { w.setBlock(x, y, z, B.AIR, true); changed++; } }
-          else if (id === B.WATER) { /* water stays */ }
+          else if (VC.Blocks.FLUID[id]) { /* fluids stay */ }
         }
         if (changed || this.primed.length) w.markRegionDirty(cx - R - 1, cz - R - 1, cx + R + 1, cz + R + 1, cx, cz);
       }
