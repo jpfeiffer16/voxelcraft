@@ -126,3 +126,6 @@ html.mobile #hearts canvas { width: 15px; height: 15px; }
 #hurt-overlay.on { opacity: 1; transition: none; }
 #dead { background: rgba(120, 0, 0, 0.45); }
 .dead-panel h1 { color: #ff6b6b; }
+
+.tilt-status { font-size: 12px; line-height: 1.35; margin: 6px auto 4px; padding: 5px 8px; border-radius: 4px; background: rgba(255,255,255,0.07); color: #ddd; max-width: 520px; text-align: left; }
+.tilt-status.ok { color: #9be89b; } .tilt-status.warn { color: #ffd479; } .tilt-status.bad { color: #ff9a8a; }

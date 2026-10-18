@@ -114,75 +114,192 @@
   const tiltBtn = hold('tb-tilt', () => toggleTilt());
 
   // ---------- tilt / gyro look ----------
+  // Sources: 'deviceorientation' (relative, gyro-based on Android Chrome) is preferred; 'deviceorientationabsolute'
+  // (accelerometer + magnetometer, also works on phones without a gyroscope) is used when the relative one has no data.
+  // If only beta/gamma arrive (accelerometer only, no alpha) we fall back to "steer" mode: pitch from tilt,
+  // yaw by rolling the phone like a steering wheel.
   const zee = new THREE.Vector3(0, 0, 1), q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
   const qDev = new THREE.Quaternion(), qTmp = new THREE.Quaternion(), eDev = new THREE.Euler(), eOut = new THREE.Euler();
-  let tiltPermission = typeof DeviceOrientationEvent === 'undefined' ? 'unsupported'
-    : typeof DeviceOrientationEvent.requestPermission === 'function' ? 'prompt' : 'granted';
-  let tiltSeen = false, prev = null, pendYaw = 0, pendPitch = 0;
-  // Show tilt UI only where DeviceOrientation looks usable: iOS-style permission API, or a touch device.
+  const HAS_DOE = typeof window.DeviceOrientationEvent !== 'undefined';
+  const HAS_REQUEST = HAS_DOE && typeof DeviceOrientationEvent.requestPermission === 'function';
+  const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  // iOS 13+ shows a prompt and needs a user gesture. Recent Chrome also exposes requestPermission() but resolves it
+  // without a prompt or gesture, so there we ask right away at load and start listening immediately.
+  const NEEDS_PERMISSION = HAS_REQUEST && IS_IOS;
+  let tiltPermission = !HAS_DOE ? 'unsupported' : NEEDS_PERMISSION ? 'prompt' : 'granted';
+  let tiltSeen = false, prev = null, pendYaw = 0, pendPitch = 0, steer = 0, mode = '', source = '';
+  let listening = false, listenStart = 0, lastData = 0, relFullAt = -1e9, absFullAt = -1e9, sensorBlocked = false, noDataWarned = false;
+  const stats = { deviceorientation: 0, deviceorientationabsolute: 0, nulls: 0, motion: 0, last: null, rate: 0, rateN: 0, rateT: performance.now() };
+  // Tilt UI is shown on touch devices whose browser has the DeviceOrientation API. Never hidden because of
+  // missing/null events: iOS sends nothing until permission is granted, Chrome sends nulls when sensors are blocked.
   function setTiltAvailable(on) { document.documentElement.classList.toggle('no-tilt', !on); }
-  setTiltAvailable(tiltPermission !== 'unsupported' && (navigator.maxTouchPoints > 0 || VC.autoMobile));
-  function screenAngle() { return ((screen.orientation && screen.orientation.angle) || window.orientation || 0) * Math.PI / 180; }
+  setTiltAvailable(HAS_DOE && (navigator.maxTouchPoints > 0 || 'ontouchstart' in window || VC.autoMobile));
+  function screenAngle() {
+    let a = screen.orientation && typeof screen.orientation.angle === 'number' ? screen.orientation.angle : typeof window.orientation === 'number' ? window.orientation : 0;
+    return a * Math.PI / 180;
+  }
+  const wrap = (d) => { while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; };
   function onOrient(ev) {
-    if (ev.alpha == null && ev.beta == null) { if (!tiltSeen) setTiltAvailable(false); return; } // e.g. desktop Chrome: API exists, no sensor
-    setTiltAvailable(true);
-    tiltSeen = true; updateTiltUI();
+    const now = performance.now(), type = ev.type === 'deviceorientationabsolute' ? 'deviceorientationabsolute' : 'deviceorientation';
+    stats[type]++;
+    const hasA = ev.alpha != null && isFinite(ev.alpha), hasBG = ev.beta != null && ev.gamma != null && isFinite(ev.beta) && isFinite(ev.gamma);
+    if (!hasBG) { stats.nulls++; return; } // sensor missing or blocked
+    if (hasA) { if (type === 'deviceorientation') relFullAt = now; else absFullAt = now; }
+    // pick one stream so the two never fight: relative with alpha > absolute with alpha > anything with beta/gamma
+    if (type === 'deviceorientationabsolute' && now - relFullAt < 1000) return;
+    if (type === 'deviceorientation' && !hasA && now - absFullAt < 1000) return;
+    const src = type + (hasA ? '' : '-noalpha');
+    if (src !== source) { source = src; prev = null; steer = 0; }
+    mode = hasA ? 'full' : 'steer';
+    lastData = now; stats.last = { a: ev.alpha, b: ev.beta, g: ev.gamma };
+    stats.rateN++; if (now - stats.rateT > 1000) { stats.rate = Math.round(stats.rateN * 1000 / (now - stats.rateT)); stats.rateN = 0; stats.rateT = now; }
+    if (!tiltSeen) { tiltSeen = true; sensorBlocked = false; updateTiltUI(); }
+    // device orientation -> camera orientation (W3C / three.js DeviceOrientationControls convention), remapped for screen rotation
     const D = Math.PI / 180;
-    eDev.set((ev.beta || 0) * D, (ev.alpha || 0) * D, -(ev.gamma || 0) * D, 'YXZ');
+    eDev.set(ev.beta * D, (hasA ? ev.alpha : 0) * D, -ev.gamma * D, 'YXZ');
     qDev.setFromEuler(eDev).multiply(q1).multiply(qTmp.setFromAxisAngle(zee, -screenAngle()));
     eOut.setFromQuaternion(qDev, 'YXZ');
-    const cur = { yaw: eOut.y, pitch: eOut.x };
-    if (prev && settings.tilt && active() && game.state === 'playing') {
-      let dy = cur.yaw - prev.yaw; if (dy > Math.PI) dy -= 2 * Math.PI; if (dy < -Math.PI) dy += 2 * Math.PI;
-      const dp = cur.pitch - prev.pitch;
+    const cur = { yaw: eOut.y, pitch: eOut.x, roll: eOut.z };
+    const use = settings.tilt && active() && game.state === 'playing';
+    if (prev && use) {
       const k = settings.tiltSens / 10;
-      if (Math.abs(cur.pitch) < 1.35 && Math.abs(dy) < 0.5) pendYaw += dy * k; // yaw is unstable when pointing straight up/down
+      const dy = wrap(cur.yaw - prev.yaw), dp = cur.pitch - prev.pitch;
+      // yaw is unstable when the camera points straight up/down (gimbal); skip implausible jumps (>~30° in one event)
+      if (mode === 'full' && Math.abs(cur.pitch) < 1.35 && Math.abs(dy) < 0.5) pendYaw += dy * k;
       if (Math.abs(dp) < 0.5) pendPitch += dp * k;
     }
+    // steer mode: roll (left/right lean) turns; the roll is only meaningful away from straight up/down
+    steer = mode === 'steer' && Math.abs(cur.pitch) < 1.2 ? wrap(cur.roll) : 0;
     prev = cur;
   }
+  function onMotion() { stats.motion++; }
   function startListening() {
+    if (!HAS_DOE) return;
     window.removeEventListener('deviceorientation', onOrient);
+    window.removeEventListener('deviceorientationabsolute', onOrient);
+    window.removeEventListener('devicemotion', onMotion);
     window.addEventListener('deviceorientation', onOrient);
+    if ('ondeviceorientationabsolute' in window) window.addEventListener('deviceorientationabsolute', onOrient);
+    window.addEventListener('devicemotion', onMotion);
+    if (!listening) { listening = true; listenStart = performance.now(); }
+    checkSensorPermissions();
+  }
+  // Chrome: motion sensors can be blocked per site (Site settings > Motion sensors). Query it for the status line.
+  function checkSensorPermissions() {
+    if (!navigator.permissions || !navigator.permissions.query) return;
+    for (const name of ['accelerometer', 'gyroscope']) {
+      try {
+        navigator.permissions.query({ name }).then((st) => {
+          const upd = () => { if (st.state === 'denied' && !tiltSeen) sensorBlocked = true; else if (st.state === 'granted') sensorBlocked = false; updateTiltUI(); };
+          upd(); st.onchange = upd;
+        }).catch(() => {});
+      } catch (e) {}
+    }
   }
   function recenter(level) {
     prev = null; pendYaw = 0; pendPitch = 0;
     if (level) { player().pitch = 0; game.toast('View recentered'); }
   }
-  async function requestTilt() {
-    if (tiltPermission === 'prompt') {
-      try { tiltPermission = await DeviceOrientationEvent.requestPermission(); } catch (e) { tiltPermission = 'denied'; }
-      if (tiltPermission === 'granted') { settings.tilt = true; game.saveSettings(); }
-    }
-    if (tiltPermission === 'granted') startListening();
-    updateTiltUI();
+  // iOS 13+: must be called synchronously, as the first thing, inside a click/touchend handler.
+  function requestTiltSync() {
+    if (!HAS_DOE) { tiltPermission = 'unsupported'; updateTiltUI(); return; }
+    if (!HAS_REQUEST) { tiltPermission = 'granted'; startListening(); updateTiltUI(); return; }
+    if (!NEEDS_PERMISSION) { askQuietly(true); return; }
+    let pr;
+    try { pr = DeviceOrientationEvent.requestPermission(); } catch (e) { tiltPermission = 'denied'; updateTiltUI(); return; }
+    // motion permission shares the prompt on iOS; ask in the same gesture (ignored if unsupported)
+    try { if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') DeviceMotionEvent.requestPermission().catch(() => {}); } catch (e) {}
+    tiltPermission = 'requesting'; updateTiltUI();
+    Promise.resolve(pr).then((r) => {
+      tiltPermission = r === 'granted' ? 'granted' : 'denied';
+      if (r === 'granted') { settings.tilt = true; game.saveSettings(); startListening(); game.toast('Tilt look enabled'); }
+      else game.toast('Motion access denied — see the tilt status in the menu');
+      updateTiltUI();
+    }, () => { tiltPermission = 'denied'; updateTiltUI(); });
+  }
+  // Non-iOS browsers with requestPermission (Chrome): no prompt is shown; 'denied' means the site setting blocks sensors.
+  function askQuietly(fromTap) {
+    let pr; try { pr = DeviceOrientationEvent.requestPermission(); } catch (e) { return; }
+    Promise.resolve(pr).then((r) => {
+      if (r === 'granted') { tiltPermission = 'granted'; startListening(); if (fromTap) toggleTilt(); }
+      else { tiltPermission = 'denied'; sensorBlocked = true; }
+      updateTiltUI();
+    }, () => {});
   }
   function toggleTilt() {
-    if (tiltPermission === 'prompt') { requestTilt(); return; }
-    if (tiltPermission !== 'granted' || !tiltSeen) { game.toast(tiltPermission === 'denied' ? 'Tilt permission denied (check browser settings)' : 'Tilt sensor not available'); return; }
+    if (tiltPermission === 'prompt' || tiltPermission === 'denied') { requestTiltSync(); return; } // retry (iOS re-prompts after a Safari restart)
+    if (tiltPermission === 'unsupported') { game.toast('Tilt look is not supported by this browser'); return; }
+    if (!listening) startListening();
     settings.tilt = !settings.tilt; game.saveSettings(); recenter(false);
-    game.toast(settings.tilt ? 'Tilt look on' : 'Tilt look off'); updateTiltUI();
+    if (settings.tilt) { listenStart = Math.max(listenStart, tiltSeen ? 0 : performance.now()); noDataWarned = false; }
+    game.toast(settings.tilt ? (tiltSeen ? 'Tilt look on' : 'Tilt look on — waiting for sensor…') : 'Tilt look off'); updateTiltUI();
+  }
+  function tiltStatus() {
+    const now = performance.now();
+    if (tiltPermission === 'unsupported') return { cls: 'bad', text: 'Tilt: not supported by this browser.' };
+    if (!window.isSecureContext && location.protocol !== 'file:') return { cls: 'bad', text: 'Tilt: needs a secure (https://) page.' };
+    if (tiltPermission === 'prompt') return { cls: 'warn', text: 'Tilt: permission needed — tap “Enable tilt look” to allow motion access.' };
+    if (tiltPermission === 'requesting') return { cls: 'warn', text: 'Tilt: waiting for your answer to the motion-access prompt…' };
+    if (tiltPermission === 'denied') return { cls: 'bad', text: IS_IOS
+      ? 'Tilt: motion access denied. iPhone/iPad: close Safari completely and reopen it (or Settings › Safari › Advanced › Website Data › delete this site), then tap “Enable tilt look” again.'
+      : 'Tilt: motion sensors are blocked for this site. Chrome: tap the ⓘ / lock icon next to the address › Permissions › Motion sensors › Allow (or ⋮ › Settings › Site settings › Motion sensors), then reload.' };
+    if (!settings.tilt) return { cls: '', text: 'Tilt: off (tap the button to turn it on).' + (tiltSeen ? ' Sensor OK.' : '') };
+    const fresh = now - lastData < 1500;
+    if (tiltSeen && fresh) {
+      const l = stats.last, f = (v) => v == null ? '—' : Math.round(v);
+      const src = source.startsWith('deviceorientationabsolute') ? 'absolute' : 'relative';
+      return { cls: 'ok', text: `Tilt: receiving data (${src}, ${stats.rate || '…'}/s${mode === 'steer' ? ', no compass/gyro — lean left/right to turn' : ''}) · α ${f(l.a)} β ${f(l.b)} γ ${f(l.g)} · screen ${Math.round(screenAngle() * 180 / Math.PI)}°` };
+    }
+    const waited = now - listenStart;
+    if (sensorBlocked || (listening && waited > 2000)) {
+      return { cls: 'bad', text: (tiltSeen ? 'Tilt: sensor data stopped. ' : 'Tilt: no motion-sensor data' + (stats.nulls ? ' (sensor reports empty values)' : '') + '. ') +
+        (IS_IOS ? 'Tap “Enable tilt look”; if that does nothing, close Safari completely and reopen it.'
+          : 'Chrome: tap the ⓘ / lock icon next to the address › Permissions › Motion sensors › Allow (or ⋮ › Settings › Site settings › Motion sensors), then reload. Phones without a motion sensor can use touch-drag look.') };
+    }
+    return { cls: 'warn', text: 'Tilt: waiting for sensor…' };
   }
   function updateTiltUI() {
-    const active = tiltPermission === 'granted' && tiltSeen && settings.tilt;
-    tiltBtn.classList.toggle('on', active);
+    const on = tiltPermission === 'granted' && tiltSeen && settings.tilt;
+    tiltBtn.classList.toggle('on', on);
     let label;
     if (tiltPermission === 'unsupported') label = 'Tilt look not supported';
     else if (tiltPermission === 'prompt') label = 'Enable tilt look';
-    else if (tiltPermission === 'denied') label = 'Tilt permission denied';
-    else if (!tiltSeen) label = 'Tilt: waiting for sensor…';
-    else label = settings.tilt ? 'Tilt look: ON (tap to turn off)' : 'Tilt look: OFF (tap to turn on)';
-    for (const id of ['btn-tilt-start', 'btn-tilt-pause']) { const b = $(id); b.textContent = label; b.classList.toggle('on', active); }
+    else if (tiltPermission === 'requesting') label = 'Allow motion access…';
+    else if (tiltPermission === 'denied') label = 'Enable tilt look (denied — retry)';
+    else if (!settings.tilt) label = 'Tilt look: OFF (tap to turn on)';
+    else if (!tiltSeen) label = 'Tilt look: ON (waiting for sensor)';
+    else label = 'Tilt look: ON (tap to turn off)';
+    for (const id of ['btn-tilt-start', 'btn-tilt-pause']) { const b = $(id); b.textContent = label; b.classList.toggle('on', on); }
+    const st = tiltStatus();
+    for (const el of document.querySelectorAll('.tilt-status')) { el.textContent = st.text; el.className = 'tilt-status tilt-only ' + st.cls; }
   }
-  for (const id of ['btn-tilt-start', 'btn-tilt-pause']) $(id).addEventListener('click', (e) => { e.stopPropagation(); if (tiltPermission === 'prompt') requestTilt(); else toggleTilt(); });
+  // Explicit buttons: requestPermission is the first statement of the click handler (iOS user-activation rule).
+  for (const id of ['btn-tilt-start', 'btn-tilt-pause']) $(id).addEventListener('click', (e) => {
+    if (tiltPermission === 'prompt' || tiltPermission === 'denied') { requestTiltSync(); e.stopPropagation(); return; }
+    e.stopPropagation(); toggleTilt();
+  });
   $('btn-recenter').addEventListener('click', () => recenter(true));
-  // iOS: ask for motion permission on the same tap that starts the game
-  $('btn-play').addEventListener('click', () => { if (active() && tiltPermission === 'prompt' && settings.tilt) requestTilt(); recenter(false); }, true);
-  $('btn-resume').addEventListener('click', () => recenter(false), true);
+  // Called by main.js as the very first statement of the Play / New World / Resume click handlers.
+  function beforePlay() {
+    if (NEEDS_PERMISSION && tiltPermission === 'prompt' && settings.tilt && active()) requestTiltSync();
+    else if (tiltPermission === 'granted' && !listening) startListening();
+    recenter(false);
+    if (settings.tilt && !tiltSeen) { listenStart = Math.max(listenStart, performance.now()); noDataWarned = false; }
+  }
   if (tiltPermission === 'granted') startListening();
+  if (HAS_REQUEST && !NEEDS_PERMISSION) askQuietly(false);
   updateTiltUI();
+  setInterval(() => {
+    const pauseOpen = game.state !== 'playing';
+    if (pauseOpen) updateTiltUI();
+    // one clear hint when tilt is on but no data arrives (e.g. Chrome site setting blocks motion sensors)
+    if (!pauseOpen && active() && settings.tilt && tiltPermission === 'granted' && !tiltSeen && !noDataWarned && performance.now() - listenStart > 2000) {
+      noDataWarned = true; updateTiltUI(); game.toast('Tilt: no motion-sensor data — open ☰ for help');
+    }
+  }, 300);
   window.addEventListener('orientationchange', () => recenter(false));
   if (screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', () => recenter(false));
+  document.addEventListener('visibilitychange', () => recenter(false));
 
   function bindSlider(id, key) {
     const el = $(id), val = $(id + '-val');
@@ -203,6 +320,7 @@
     const y = pendYaw * a, pp = pendPitch * a;
     pendYaw -= y; pendPitch -= pp;
     p.yaw += y; p.pitch = clampPitch(p.pitch + pp);
+    if (steer && settings.tilt) { const dz = 0.15, r = Math.abs(steer); if (r > dz) p.yaw += Math.sign(steer) * Math.min(1, r - dz) * 2.2 * (settings.tiltSens / 10) * dt; }
     // long-press on the world = break (repeats while held)
     for (const L of looks.values()) {
       if (!L.moved && now - L.t > 380) {
@@ -219,7 +337,7 @@
   requestAnimationFrame(tick);
 
   // expose for testing
-  game.mobile = { recenter, get tiltPermission() { return tiltPermission; }, get tiltSeen() { return tiltSeen; }, onOrient };
+  game.mobile = { recenter, beforePlay, requestTilt: requestTiltSync, tiltStatus, get tiltPermission() { return tiltPermission; }, get tiltSeen() { return tiltSeen; }, get mode() { return mode; }, get source() { return source; }, stats, onOrient };
 })();
 // sync with the state main.js may already be in (e.g. ?test=1 auto-start)
 if (window.game && window.game.onState) window.game.onState(window.game.state);

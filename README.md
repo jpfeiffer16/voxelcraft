@@ -58,3 +58,16 @@ Mobile defaults: render distance 4, pixel ratio 1.
   You can switch **Hostile mobs** off in the pause menu: zombies go away and mobs can't hurt you any more.
 - **Health**: you have 10 hearts. They regenerate slowly after a few seconds without damage. When you die, a respawn
   screen appears and you come back at the world spawn point. The world is kept.
+
+### Tilt look troubleshooting
+
+The pause menu has a **Tilt status** line. It says whether permission was granted or denied, whether the game is still
+waiting for the sensor, or whether data is arriving (with the event rate and the live α/β/γ values).
+
+- **Android Chrome** doesn't show a permission prompt; it allows motion sensors silently. If the status says no
+  sensor data, motion sensors are blocked for the site. Fix it under ⓘ / lock icon › Permissions › Motion sensors ›
+  Allow, then reload. Phones without a gyroscope fall back to the compass-based (absolute) orientation. Phones with
+  only an accelerometer get "steer" mode: lean the phone left or right to turn.
+- **iPhone / iPad**: tap *Tap to Play* or *Enable tilt look* and allow motion access when asked. If you denied it
+  before, Safari won't ask again until you close it completely and reopen it, or clear this site's data
+  (Settings › Safari › Advanced › Website Data).

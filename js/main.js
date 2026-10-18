@@ -309,16 +309,17 @@
     else if (state === 'playing' && !noLock()) setState('paused'); // in touch mode, releasing the mouse doesn't pause
   });
 
-  $('btn-play').addEventListener('click', play);
+  $('btn-play').addEventListener('click', () => { if (window.game && window.game.mobile) window.game.mobile.beforePlay(); play(); }); // tilt permission must be requested first, synchronously (iOS)
   document.addEventListener('pointerdown', () => { if (settings.sound) VC.MobSounds.unlock(); }, { once: true });
   $('btn-new').addEventListener('click', () => {
+    if (window.game && window.game.mobile) window.game.mobile.beforePlay(); 
     const s = $('seed').value;
     const seed = s.trim() ? hashSeed(s) : (Math.random() * 2147483647) | 0;
     if (localStorage.getItem(SAVE_KEY) && !confirm('Start a new world? Your current saved world will be replaced.')) return;
     try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
     createWorld(seed, null); saveGame(); play();
   });
-  $('btn-resume').addEventListener('click', play);
+  $('btn-resume').addEventListener('click', () => { if (window.game && window.game.mobile) window.game.mobile.beforePlay(); play(); });
   $('btn-save').addEventListener('click', () => { $('save-status').textContent = saveGame() ? 'Saved at ' + new Date().toLocaleTimeString() : 'Save failed (storage full?)'; });
   $('btn-title').addEventListener('click', () => { saveGame(); setState('title'); });
   $('btn-inv-done').addEventListener('click', play);

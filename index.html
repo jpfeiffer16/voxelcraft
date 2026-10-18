@@ -54,6 +54,7 @@
     <div class="touch-toggle"><span class="tt-label">Touch controls:</span><div class="seg touch-seg"><button data-mode="auto">Auto</button><button data-mode="on">On</button><button data-mode="off">Off</button></div></div>
     <div class="touch-note"></div>
     <div class="row mobile-only tilt-only"><button id="btn-tilt-start" class="tilt-btn">Enable tilt look</button></div>
+    <div class="tilt-status tilt-only mobile-only" id="tilt-status-start"></div>
     <div class="controls mobile-only">
       <div><b>Left thumb</b> drag to move</div><div><b>Right side</b> drag to look</div>
       <div><b>Tap</b> place / tame / light TNT</div><div><b>Hold</b> break block / attack</div>
@@ -82,6 +83,7 @@
     <label>Render distance: <span id="rd-val"></span> chunks<input id="rd" type="range" min="3" max="16" step="1"></label>
     <div class="mobile-only">
       <div class="row"><button id="btn-tilt-pause" class="tilt-btn tilt-only">Enable tilt look</button><button id="btn-recenter">Recenter view</button></div>
+      <div class="tilt-status tilt-only" id="tilt-status"></div>
       <label class="tilt-only">Tilt sensitivity: <span id="tiltSens-val"></span><input id="tiltSens" type="range" min="2" max="25" step="1"></label>
       <label>Touch look sensitivity: <span id="lookSens-val"></span><input id="lookSens" type="range" min="2" max="25" step="1"></label>
     </div>
