@@ -141,3 +141,16 @@ html.mobile #hearts canvas { width: 15px; height: 15px; }
 #tb-dismount { right: 8px; bottom: 86px; display: none; font-size: 22px; background: rgba(160,100,40,0.6); }
 body.riding #tb-dismount { display: block; }
 body.riding #tb-down { display: none !important; }
+
+/* weapons: fire button (bow / trident in hand), charge bar */
+#tb-fire { right: 78px; bottom: 78px; display: none; background: rgba(170,120,60,0.55); }
+body.ranged #tb-fire { display: block; }
+body.ranged #tb-place { display: none; }
+#charge { position: fixed; left: 50%; top: calc(50% + 22px); width: 56px; height: 6px; transform: translateX(-50%); background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.5); display: none; pointer-events: none; }
+#charge div { height: 100%; width: 0; background: #ffd05a; }
+#charge.full div { background: #ff7a3a; }
+/* sound settings */
+.audio-box { border-top: 1px solid #444; margin-top: 8px; padding-top: 4px; }
+.vol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.vol-grid label { margin: 6px 0; }
+#btn-mute.muted { background: #8a4a4a; }

@@ -5,7 +5,8 @@ No server, no build step: just open `index.html` (double-click / file://).
 
 Controls: mouse look · WASD move · Space jump/swim · Shift sprint (descend while flying) ·
 F or double-tap Space toggles flying · Ctrl fast-fly · Left click break · Right click place ·
-Middle click pick block · 1-9 / wheel hotbar · E block inventory · F3 debug HUD · Esc pause/settings.
+Middle click pick block · 1-9 / wheel hotbar · E block inventory · F3 debug HUD · M mute · Esc pause/settings.
+Hold right click with a bow or trident to draw, release to shoot.
 
 World edits, player position, time of day and hotbar auto-save to localStorage.
 Three.js r160 (MIT) is vendored in `vendor/`.
@@ -17,7 +18,8 @@ or press **T**. Your choice is saved, and switching takes effect right away. `?m
 With touch controls on and a mouse attached, clicking the game captures the mouse for looking and clicking, and Esc releases it without pausing.
 Touch controls:
 left-thumb joystick to move, drag on the right to look, tap to place, long-press to break,
-buttons for jump/fly-up, fly-down, fly toggle, sprint, break, place, a pause menu, a tilt-look toggle and a recenter button.
+buttons for jump/fly-up, fly-down, fly toggle, sprint, break, place, a pause menu, a tilt-look toggle, a recenter button and 🔊 mute.
+With a bow or trident in hand, a 🏹 fire button replaces place: hold it to draw, release to shoot (long-pressing the view works too).
 Tap a hotbar slot to select it; `⋯` opens the block menu.
 Tilt look uses the gyroscope (DeviceOrientation). iOS asks for motion permission when you tap Play or "Enable tilt look",
 and tilt turns on once you allow it. Tilt and touch-drag work together. Sensitivity sliders are in the pause menu.
@@ -33,7 +35,7 @@ Mobile defaults: render distance 4, pixel ratio 1.
   water and big drops. Use a **spawn egg** from the block menu to place one.
   Right-click / tap an animal to tame it (it gets a collar and follows you); do it again to make it sit or follow.
   Left-click / long-press pets a tamed animal, or shoos a wild one away. Tamed and egg-spawned animals are saved with the world.
-  Animal sounds can be turned off in the pause menu.
+  Animals can also be tamed, healed and bred with food (see *Feeding* below).
 - More blocks: lantern, crafting table, pumpkin, jack o'lantern, 9 more wool colours, mossy cobblestone, hay bale,
   melon, terracotta, blue orchid, pink tulip, red mushroom (flowers can be placed on grass/dirt).
 
@@ -53,7 +55,7 @@ Mobile defaults: render distance 4, pixel ratio 1.
   fight back if you hit them. Tame a lion like a dog or cat: right-click / tap it. A tamed lion follows you, and
   tapping it again makes it sit. A following lion roars and pounces on zombies near you, and on anything that hurts
   you. Tamed dogs help fight too.
-- **Zombies** spawn at night on dark ground and in dark caves. They won't spawn near torches or other lights (block
+- **Zombies** spawn on dark ground and in dark caves, mostly at night (see *Daytime hostiles* below for the day). They won't spawn near torches or other lights (block
   light 7 or more). They chase you and hit you, and they burn up in daylight. Left-click / long-press to fight back.
   You can switch **Hostile mobs** off in the pause menu: zombies go away and mobs can't hurt you any more.
 - **Health**: you have 10 hearts. They regenerate slowly after a few seconds without damage. When you die, a respawn
@@ -96,7 +98,7 @@ Mobile defaults: render distance 4, pixel ratio 1.
   - Deep caves now have lava lakes at the bottom.
   - The flowing is calculated in small batches, a few times a second (fewer blocks per update on mobile), so it never
     stalls the game.
-- **New-world hotbar**: grass, planks, cobblestone, oak door, glass pane, bed, torch, TNT and lion egg (now horse egg, see below). Everything else is
+- **New-world hotbar**: iron sword, bow, grass, planks, cobblestone, torch, oak door, steak and horse egg. Everything else is
   in the block menu (**E**, or **⋯** on touch). **Shift + right-click** places a block against a door or bed instead of
   using it.
 
@@ -126,6 +128,59 @@ Mobile defaults: render distance 4, pixel ratio 1.
     Fish released this way are kept with the world.
   - Fish only swim inside water and dart away when you get close. A pufferfish puffs up instead.
   - Out of water a fish flops around and slowly dies.
+
+## Weapons, feeding & sound
+
+![Fighting zombies and a spider in daylight with a bow](screenshot-weapons.png)
+![Feeding tamed dogs and horses: hearts, a puppy and a foal](screenshot-feeding.png)
+
+- **Weapons** are in the block menu, and new worlds start with an iron sword and a bow. You see them in first person,
+  with a swing animation. Every hit makes the mob flash white, then red, and knocks it back.
+
+  | Weapon | Damage | Notes |
+  |---|---|---|
+  | Fist | 3 | |
+  | Wooden / stone / iron / diamond sword | 4 / 5 / 6 / 8 | Fast swing |
+  | Iron axe | 7 | Slow swing, big knockback |
+  | Bow | 2–9 (by draw) | Ranged |
+  | Trident | 7 melee, 4–9 thrown | Longer reach (6.5 blocks), thrown with a hold |
+
+  - **Bow**: hold right click (on touch, hold 🏹 or the place button, or long-press the view) to draw; the charge bar
+    fills in about 1 s and you walk slower while drawing. Release to shoot. Arrows fly with gravity, slow down in water,
+    stick in blocks (they fall if the block goes), and fade after 40 s. A quick click or tap fires a weak shot. Arrows
+    are unlimited and pass by tamed animals and the horse you ride.
+  - **Trident**: hold to throw. It returns to you after it hits something.
+- **Daytime hostiles**: zombies, wolves, spiders and the other predators now also come out by day, less often than at
+  night and with a lower cap (60% of the normal limit of 16, or 7 on mobile). Torches still stop spawns nearby, and the
+  **Hostile mobs** switch still turns them all off.
+- **Feeding**: the block menu has **steak, bone, cooked fish, apple, carrot and wheat**, and hay bales work as horse food.
+  Right-click or tap an animal while holding its food:
+
+  | Animal | Food |
+  |---|---|
+  | Dog | bone, steak |
+  | Cat | cooked fish |
+  | Lion | steak |
+  | Horse | apple, carrot, wheat, hay |
+
+  - Food heals the animal, and hearts float up. A few feeds tame a wild one. Tapping a dog, cat or lion with an empty
+    hand still tames it as before.
+  - Feed two tamed animals of the same kind that are near each other, and they fall in love and have a **baby**. The baby
+    is a half-size, tamed copy that grows up over about 4 minutes; food speeds that up. Foals can't be ridden. Each
+    parent has to wait a minute before it can breed again. Babies are saved with the world.
+  - Food the animal doesn't eat does the normal tap action instead (sit, follow, ride).
+  - You can **eat** food yourself: right-click or tap while not aiming at an animal. Steak +4 hearts, fish 2.5, apple
+    2, carrot 1.5; bones and wheat are animal food only.
+- **Sound** is all synthesized live with WebAudio, so there are no audio files:
+  - **Footsteps and blocks**: footsteps per material (grass, gravel, sand, snow, wood, stone, glass, wool, metal,
+    water), and break and place sounds.
+  - **Combat and creatures**: sword swing and hit, axe, bow draw, twang and arrow thunk, trident, mob hurt and death,
+    eating, splashes and swimming, horse hooves.
+  - **Ambience**: birdsong by day; crickets and owls at night; drips, rumble and a drone in caves; a muffled hum
+    underwater.
+  - **Music**: gentle generative background music plays now and then.
+  - **Controls**: the pause menu has **Master, Music, Effects and Mobs** volume sliders (saved) and a mute button (also
+    **M**, or 🔊 on touch). Browsers only allow sound after a first tap or click, so sound starts on your first touch.
 
 ### Tilt look troubleshooting
 

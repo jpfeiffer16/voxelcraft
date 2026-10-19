@@ -22,6 +22,7 @@
 <div id="burn-overlay"></div>
 <div id="sleep-overlay"></div>
 <div id="toast"></div>
+<div id="charge"><div></div></div>
 <div id="hearts" class="hidden"></div>
 <div id="hotbar"></div>
 
@@ -31,11 +32,13 @@
   <div id="tb-top">
     <button class="tbtn small tilt-only" id="tb-tilt" title="Tilt look">📱</button>
     <button class="tbtn small" id="tb-recenter" title="Recenter view">◎</button>
+    <button class="tbtn small" id="tb-mute" title="Sound on / off">🔊</button>
     <button class="tbtn small" id="tb-menu" title="Menu">☰</button>
   </div>
   <div id="tb-actions">
     <button class="tbtn" id="tb-break" title="Break">⛏</button>
     <button class="tbtn" id="tb-place" title="Place">▣</button>
+    <button class="tbtn" id="tb-fire" title="Hold to draw, release to shoot">🏹</button>
     <button class="tbtn" id="tb-sprint" title="Sprint">»</button>
     <button class="tbtn" id="tb-fly" title="Fly">✈</button>
     <button class="tbtn" id="tb-down" title="Fly down">▼</button>
@@ -66,6 +69,8 @@
       <div class="tilt-only"><b>Tilt phone</b> to aim (📱 toggle)</div><div><b>◎</b> recenter · <b>☰</b> menu</div>
       <div><b>Hotbar</b> tap to select</div><div><b>⋯</b> doors, beds, glass, buckets, eggs…</div>
       <div><b>Tap a horse</b> ride · <b>»</b> gallop</div><div><b>⏏</b> get off the horse</div>
+      <div><b>⛏ / hold</b> attack with the sword</div><div><b>🏹 hold &amp; release</b> shoot (bow / trident)</div>
+      <div><b>Tap an animal</b> with food: feed</div><div><b>Tap</b> with food: eat · <b>🔊</b> mute</div>
     </div>
     <div class="controls desktop-only">
       <div><b>Mouse</b> look</div><div><b>W A S D</b> move</div>
@@ -77,6 +82,8 @@
       <div><b>Shift + right click</b> place against a door / bed</div><div><b>Middle click</b> pick block</div>
       <div><b>Esc</b> pause / settings</div><div><b>Bucket</b> right click a source to scoop</div>
       <div><b>Right click horse</b> ride (Ctrl gallop, Space jump)</div><div><b>Shift</b> get off the horse</div>
+      <div><b>Left click</b> with a sword: attack</div><div><b>Hold right click</b> draw the bow / trident</div>
+      <div><b>Right click animal</b> with food: feed / breed</div><div><b>Right click</b> with food: eat · <b>M</b> mute</div>
     </div>
   </div>
 </div>
@@ -97,8 +104,17 @@
     <label class="desktop-only">Mouse sensitivity: <span id="sens-val"></span><input id="sens" type="range" min="1" max="20" step="1"></label>
     <label>Field of view: <span id="fov-val"></span><input id="fov" type="range" min="50" max="110" step="1"></label>
     <label class="check"><input type="checkbox" id="chk-debug"> Show debug info (F3)</label>
-    <label class="check"><input type="checkbox" id="chk-hostile"> Hostile mobs (zombies at night &amp; in caves)</label>
-    <label class="check"><input type="checkbox" id="chk-sound"> Sounds</label>
+    <label class="check"><input type="checkbox" id="chk-hostile"> Hostile mobs (zombies, wolves, spiders… by day &amp; night)</label>
+    <label class="check"><input type="checkbox" id="chk-burn"> Daylight burning (zombies burn in the sun)</label>
+    <div class="audio-box">
+      <div class="row"><button id="btn-mute">🔊 Sound: on</button></div>
+      <div class="vol-grid">
+        <label>Master: <span id="volMaster-val"></span><input id="volMaster" type="range" min="0" max="100" step="1"></label>
+        <label>Music: <span id="volMusic-val"></span><input id="volMusic" type="range" min="0" max="100" step="1"></label>
+        <label>Effects: <span id="volEffects-val"></span><input id="volEffects" type="range" min="0" max="100" step="1"></label>
+        <label>Mobs: <span id="volMobs-val"></span><input id="volMobs" type="range" min="0" max="100" step="1"></label>
+      </div>
+    </div>
     <div class="row"><button id="btn-save">Save World</button><button id="btn-title">Quit to Title</button></div>
     <div id="save-status"></div>
   </div>
@@ -129,11 +145,13 @@
 <script src="js/noise.js"></script>
 <script src="js/blocks.js"></script>
 <script src="js/textures.js"></script>
+<script src="js/audio.js"></script>
 <script src="js/world.js"></script>
 <script src="js/fluids.js"></script>
 <script src="js/mesher.js"></script>
 <script src="js/player.js"></script>
 <script src="js/mobs.js"></script>
+<script src="js/weapons.js"></script>
 <script src="js/tnt.js"></script>
 <script src="js/main.js"></script>
 <script src="js/mobile.js"></script>

@@ -293,6 +293,69 @@ window.VC = window.VC || {};
   P[T.dog_egg] = egg([225, 205, 170], [130, 85, 50]);
   P[T.cat_egg] = egg([240, 160, 70], [60, 45, 40]);
 
+
+  // ---- weapons & food (drawn with tiny line / ellipse helpers, then a dark outline pass)
+  function line(t, x0, y0, x1, y1, c, amt = 5) { const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) || 1; for (let i = 0; i <= n; i++) t.set(Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n), t.vary(c, amt)); }
+  function ellipse(t, cx, cy, rx, ry, c, amt = 8) { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const dx = (x + 0.5 - cx) / rx, dy = (y + 0.5 - cy) / ry; if (dx * dx + dy * dy <= 1) t.set(x, y, t.vary(c, amt)); } }
+  function outline(t, c) {
+    const op = []; for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) op[y * 16 + x] = t.get(x, y)[3] > 0;
+    const o = (x, y) => x >= 0 && y >= 0 && x < 16 && y < 16 && op[y * 16 + x];
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (!op[y * 16 + x] && (o(x - 1, y) || o(x + 1, y) || o(x, y - 1) || o(x, y + 1))) t.set(x, y, c);
+  }
+  function sword(L, D, O) {
+    return (t) => {
+      clear(t);
+      line(t, 5, 10, 13, 2, L, 3); line(t, 6, 10, 14, 2, D, 3); t.set(14, 1, L);   // blade (light edge + darker edge)
+      line(t, 5, 9, 12, 2, L, 3);
+      line(t, 2, 9, 6, 13, [95, 65, 32], 4); line(t, 3, 9, 7, 13, [95, 65, 32], 4);   // cross guard
+      line(t, 4, 12, 2, 14, [125, 88, 48], 4); t.set(1, 15, [85, 60, 30]);              // handle + pommel
+      outline(t, O);
+    };
+  }
+  P[T.wood_sword] = sword([182, 142, 90], [128, 94, 54], [60, 40, 20]);
+  P[T.stone_sword] = sword([165, 165, 165], [112, 112, 112], [48, 48, 48]);
+  P[T.iron_sword] = sword([238, 238, 238], [188, 188, 192], [70, 70, 74]);
+  P[T.diamond_sword] = sword([130, 245, 232], [45, 190, 180], [18, 70, 70]);
+  P[T.iron_axe] = (t) => {
+    clear(t);
+    for (let y = 1; y <= 6; y++) for (let x = 7; x <= 11; x++) t.set(x, y, t.vary(x === 7 ? [240, 240, 244] : x === 8 ? [210, 210, 214] : [170, 170, 176], 4));
+    t.set(7, 1, [0, 0, 0], 0); t.set(7, 6, [0, 0, 0], 0);
+    line(t, 2, 14, 12, 4, [125, 88, 48], 5); line(t, 3, 14, 12, 5, [100, 70, 38], 5);
+    outline(t, [55, 45, 35]);
+  };
+  function bow(pulled) {
+    return (t) => {
+      clear(t);
+      for (let y = 1; y <= 14; y++) { const x = Math.round(5 + 6.5 * Math.sin(Math.PI * (y - 1) / 13)); t.set(x, y, t.vary([140, 95, 50], 6)); t.set(x - 1, y, t.vary([110, 72, 36], 6)); }
+      if (!pulled) for (let y = 2; y <= 13; y++) t.set(4, y, [225, 225, 225]);
+      else {
+        line(t, 4, 2, 2, 8, [225, 225, 225], 2); line(t, 2, 8, 4, 13, [225, 225, 225], 2);
+        line(t, 2, 8, 13, 8, [150, 110, 60], 3); t.set(14, 8, [190, 190, 196]); t.set(13, 7, [190, 190, 196]); t.set(13, 9, [190, 190, 196]); t.set(15, 8, [160, 160, 166]);
+        t.set(1, 7, [240, 240, 240]); t.set(1, 9, [240, 240, 240]); t.set(2, 7, [240, 240, 240]); t.set(2, 9, [240, 240, 240]);
+      }
+      outline(t, [50, 34, 18]);
+    };
+  }
+  P[T.bow] = bow(false); P[T.bow_pull] = bow(true);
+  P[T.arrow] = (t) => { clear(t); line(t, 3, 12, 12, 3, [150, 110, 60], 3); t.set(13, 2, [200, 200, 205]); t.set(12, 2, [180, 180, 186]); t.set(13, 3, [180, 180, 186]); t.set(14, 1, [215, 215, 220]);
+    t.set(2, 12, [240, 240, 240]); t.set(3, 13, [240, 240, 240]); t.set(1, 13, [220, 220, 220]); t.set(2, 14, [220, 220, 220]); outline(t, [50, 40, 30]); };
+  P[T.trident] = (t) => {
+    clear(t); const C1 = [70, 200, 190], C2 = [40, 140, 140];
+    line(t, 1, 15, 11, 5, C2, 5); line(t, 2, 15, 11, 6, C1, 5);
+    line(t, 9, 3, 13, 7, C1, 4);
+    line(t, 9, 3, 11, 1, C1, 4); line(t, 11, 5, 14, 2, [150, 240, 230], 4); t.set(15, 1, [200, 250, 245]); line(t, 13, 7, 15, 5, C1, 4);
+    outline(t, [20, 60, 60]);
+  };
+  P[T.steak] = (t) => { clear(t); ellipse(t, 8, 8.5, 6.3, 5, [150, 62, 40], 10); ellipse(t, 9, 9, 3.5, 2.6, [120, 45, 30], 8); for (let i = 0; i < 6; i++) t.set(5 + i, 5 + (i % 2), [210, 160, 120]); t.set(4, 7, [220, 190, 160]); t.set(12, 11, [100, 38, 25]); outline(t, [70, 30, 20]); };
+  P[T.bone] = (t) => { clear(t); line(t, 4, 12, 11, 5, [235, 230, 215], 4); line(t, 4, 11, 11, 4, [215, 210, 195], 4);
+    for (const [x, y] of [[2, 12], [3, 13], [3, 11], [4, 14], [12, 2], [13, 3], [11, 3], [12, 4]]) t.set(x, y, t.vary([240, 236, 222], 4)); outline(t, [120, 115, 100]); };
+  P[T.cooked_cod] = (t) => { clear(t); ellipse(t, 7, 8.5, 5.5, 3.4, [205, 145, 72], 10); for (let y = 6; y <= 11; y++) for (let x = 12; x <= 14; x++) if (Math.abs(y - 8.5) <= (x - 11.5) * 1.1) t.set(x, y, t.vary([175, 115, 55], 8));
+    line(t, 5, 10, 7, 7, [150, 95, 45], 3); line(t, 8, 10, 10, 7, [150, 95, 45], 3); t.set(3, 7, [30, 25, 20]); outline(t, [90, 55, 25]); };
+  P[T.apple] = (t) => { clear(t); ellipse(t, 8, 9.5, 5.3, 5, [205, 30, 32], 10); t.set(5, 7, [255, 170, 170]); t.set(6, 6, [250, 130, 130]); t.set(8, 3, [100, 70, 40]); t.set(8, 4, [100, 70, 40]); t.set(9, 3, [70, 160, 50]); t.set(10, 2, [70, 160, 50]); t.set(10, 3, [60, 140, 45]); outline(t, [90, 15, 15]); };
+  P[T.carrot] = (t) => { clear(t); for (let k = 0; k <= 9; k++) { const x = 2 + k, y = 13 - k, w = Math.floor(k / 3.5); for (let d = -w; d <= w; d++) t.set(x + d, y + d, t.vary(k % 3 === 1 ? [210, 110, 25] : [240, 135, 35], 6)); }
+    line(t, 11, 4, 13, 1, [70, 170, 50], 6); line(t, 12, 4, 15, 3, [60, 150, 45], 6); line(t, 11, 3, 11, 1, [80, 180, 60], 6); outline(t, [110, 55, 15]); };
+  P[T.wheat] = (t) => { clear(t); for (const [x0, x1] of [[4, 8], [8, 8], [12, 9]]) { line(t, x0, 15, x1, 4, [190, 160, 60], 6); for (let y = 2; y < 8; y++) t.set(x1 + ((y % 2) ? 1 : -1) * (y < 7 ? 1 : 0), y, t.vary([235, 205, 95], 8)); t.set(x1, 1, [235, 205, 95]); } outline(t, [120, 95, 30]); };
+
   function buildAtlas() {
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;

@@ -89,6 +89,9 @@ window.VC = window.VC || {};
     puffer: { hw: 0.15, h: 0.3, speed: 0.6, swim: 0.8, hp: 3, fish: true },
   };
   VC.MOB_TYPES = TYPES;
+  // voice pitch for the generic hurt / death sounds
+  const VOICE = { dog: 1.35, cat: 1.75, lion: 0.75, zombie: 0.62, wolf: 1.1, bear: 0.5, spider: 1.6, croc: 0.58, horse: 0.85, cod: 2.2, salmon: 2.1, tropical: 2.4, puffer: 2.3 };
+  const GROW = 240; // seconds for a baby to grow up
   const FACE_SHADE = [0.8, 0.8, 1.0, 0.5, 0.7, 0.7];
 
   // Box geometry with baked per-face shading and colour
@@ -294,22 +297,12 @@ window.VC = window.VC || {};
     return { root, mat, parts };
   }
 
-  // ---------- sounds (tiny WebAudio synth) ----------
-  let actx = null, noiseBuf = null;
-  function audio() {
-    if (!actx) { const A = window.AudioContext || window.webkitAudioContext; if (!A) return null; try { actx = new A(); } catch (e) { return null; } }
-    if (actx.state === 'suspended') actx.resume().catch(() => {});
-    return actx;
-  }
-  function noise(ctx) {
-    if (!noiseBuf) { noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
-    const n = ctx.createBufferSource(); n.buffer = noiseBuf; return n;
-  }
+  // ---------- creature & effect voices (synthesized; routed through VC.Audio's mixer) ----------
+  const noise = (ctx) => VC.Audio.noise(ctx);
   function env(ctx, g, t, a, peak, dur) { g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); }
-  function playSound(type, vol) {
-    const ctx = actx; if (!ctx || vol <= 0.01) return; // only after a user gesture unlocked audio
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    const t = ctx.currentTime, out = ctx.createGain(); out.gain.value = Math.min(1, vol); out.connect(ctx.destination);
+  const MOB_VOICES = ['dog', 'cat', 'lion', 'zombie', 'wolf', 'bear', 'horse', 'spider', 'croc'];
+  function playSound(type, vol, pos) { return VC.Audio.play(type, vol, pos ? { pos } : undefined); }
+  function legacySynth(type, ctx, out, t) {
     if (type === 'dog') {
       for (let k = 0; k < 2; k++) {
         const o = ctx.createOscillator(), f = ctx.createBiquadFilter(), gg = ctx.createGain();
@@ -403,10 +396,14 @@ window.VC = window.VC || {};
     }
   }
 
+  for (const n of MOB_VOICES.concat(['door_open', 'door_close', 'hurt', 'hit', 'fuse', 'boom']))
+    VC.Audio.register(n, (ctx, out, t) => legacySynth(n, ctx, out, t), MOB_VOICES.includes(n) ? 'mobs' : 'effects', n === 'boom' ? 2 : 1.8);
+
   // ---------- particles (hearts / puffs) ----------
   function spriteTex(draw) { const c = document.createElement('canvas'); c.width = c.height = 16; draw(c.getContext('2d')); const t = new THREE.CanvasTexture(c); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; return t; }
   const heartTex = spriteTex((g) => { g.fillStyle = '#e8203a'; const rows = ['..XX...XX..', '.XXXX.XXXX.', 'XXXXXXXXXXX', 'XXXXXXXXXXX', '.XXXXXXXXX.', '..XXXXXXX..', '...XXXXX...', '....XXX....', '.....X.....']; rows.forEach((r, y) => [...r].forEach((ch, x) => { if (ch === 'X') g.fillRect(x + 2, y + 3, 1, 1); })); g.fillStyle = '#ff8a9a'; g.fillRect(4, 4, 1, 1); });
   const fireTex = spriteTex((g) => { g.fillStyle = '#ff7a1a'; g.fillRect(4, 6, 8, 9); g.fillStyle = '#ffc23a'; g.fillRect(6, 8, 4, 6); g.fillStyle = '#fff2a0'; g.fillRect(7, 11, 2, 3); g.fillStyle = '#ff7a1a'; g.fillRect(6, 3, 3, 3); });
+  const critTex = spriteTex((g) => { g.fillStyle = '#fff6c0'; g.fillRect(7, 2, 2, 12); g.fillRect(2, 7, 12, 2); g.fillStyle = '#ffffff'; g.fillRect(6, 6, 4, 4); });
   const puffTex = spriteTex((g) => { g.fillStyle = '#ddd'; g.fillRect(4, 4, 8, 8); g.fillStyle = '#bbb'; g.fillRect(6, 6, 4, 4); });
 
   class Mobs {
@@ -415,7 +412,8 @@ window.VC = window.VC || {};
       this.list = []; this.particles = [];
       this.max = opts.max || 16; this.maxWild = opts.maxWild || 6; this.maxHostile = opts.maxHostile || opts.maxZombies || 12; this.maxWildLions = opts.maxWildLions || 2;
       this.mobile = !!opts.mobile; this.maxFish = opts.maxFish || (this.mobile ? 6 : 16); this.fishTimer = 2; this.maxWildHorses = this.mobile ? 3 : 5;
-      this.spawnTimer = 3; this.hostileTimer = 4; this.sound = true; this.hostile = true;
+      this.spawnTimer = 3; this.hostileTimer = 4; this.sound = true; this.hostile = true; this.burnDaylight = false;
+      this.onBreed = null; // (baby, parent) => void
       this.daylight = 1; this.player = null;
       this.onPlayerDamage = null; // (amount, mob) => void
     }
@@ -436,13 +434,20 @@ window.VC = window.VC || {};
       const m = Object.assign({ type, coat: coatIdx, model, pos: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), yaw: o.yaw != null ? o.yaw : Math.random() * Math.PI * 2,
         tamed: !!o.tamed, sitting: !!o.sitting, wild: o.wild !== undefined ? o.wild : false, state: 'idle', timer: 1 + Math.random() * 3,
         dir: 0, phase: 0, onGround: false, lightT: 0, soundT: 4 + Math.random() * 20, hpMax: T.hp, cd: 0, attackAnim: 0, hurtT: 0, angry: 0, enemy: null, burnT: 0, dead: false,
-        foe: null, foeT: 0, regenT: 0, lavaT: 0, climbing: false, leapT: 0, rider: null, airT: 0, pv: 0, puff: 0, graze: 0 }, T);
+        foe: null, foeT: 0, regenT: 0, lavaT: 0, climbing: false, leapT: 0, rider: null, airT: 0, pv: 0, puff: 0, graze: 0,
+        love: 0, breedCD: 0, feeds: 0, baby: !!o.baby, age: o.age || 0, growT: 0, scale: 1, knock: 0 }, T);
       m.hp = o.hp != null ? Math.min(o.hp, T.hp) : T.hp;
-      model.parts.collar.visible = m.tamed;
+      this.applyScale(m);
+      model.parts.collar.visible = m.tamed && !(m.baby && m.rideable);
       model.root.position.copy(m.pos);
       this.scene.add(model.root);
       this.list.push(m);
       return m;
+    }
+    // babies are half size and grow to full size over GROW seconds
+    applyScale(m) {
+      const T = TYPES[m.type], s = m.baby ? 0.5 + 0.5 * Math.min(1, m.age / GROW) : 1;
+      m.scale = s; m.hw = T.hw * s; m.h = T.h * s; m.model.root.scale.setScalar(s);
     }
     remove(m) { if (m.dead) return; m.dead = true; this.scene.remove(m.model.root); m.model.mat.dispose(); const i = this.list.indexOf(m); if (i >= 0) this.list.splice(i, 1); }
     setHostile(on) { this.hostile = on; if (!on) for (const m of [...this.list]) if (m.hostile) this.remove(m); if (!on) for (const m of this.list) m.angry = 0; }
@@ -550,8 +555,8 @@ window.VC = window.VC || {};
     // Hostile spawning: zombies (night surface + caves, sometimes in small hordes), spiders (night + caves),
     // wolf packs (night, near trees), bears (forests / snow, any time, rare), crocodiles (by water, any time, rare).
     spawnHostile(player) {
-      if (!this.hostile || player.dead || this.hostiles() >= this.maxHostile) return;
-      const night = this.daylight < 0.4;
+      const night = this.daylight < 0.4, cap = night ? this.maxHostile : Math.max(2, Math.ceil(this.maxHostile * 0.6)); // fewer by day
+      if (!this.hostile || player.dead || this.hostiles() >= cap) return;
       for (let attempt = 0; attempt < 5; attempt++) {
         const a = Math.random() * Math.PI * 2, r = 14 + Math.random() * 20;
         const x = Math.floor(player.pos.x + Math.cos(a) * r), z = Math.floor(player.pos.z + Math.sin(a) * r);
@@ -565,17 +570,13 @@ window.VC = window.VC || {};
           if (FLUID[gid] || !SOLID[gid] || !this.clear2(x, y, z)) continue;
           if (this.world.getBlockLight(x, y, z) >= 7 || this.world.getBlockLight(x, y + 1, z) >= 7) continue; // torches keep monsters away
           const forest = this.treesNear(x, y, z) >= 2, snowy = gid === B.SNOW;
-          if (!night) { // daytime predators
-            if ((forest || snowy) && roll < 0.35 && this.countType('bear') < (this.mobile ? 1 : 2)) { this.spawn('bear', x + 0.5, y, z + 0.5, { wild: true, coat: snowy ? 2 : (Math.random() < 0.6 ? 0 : 1) }); return; }
-            if ((gid === B.SAND || gid === B.GRASS || gid === B.DIRT) && this.waterNear(x, y, z) && roll > 0.6 && this.countType('croc') < (this.mobile ? 1 : 2)) { this.spawn('croc', x + 0.5, y, z + 0.5, { wild: true }); return; }
-            continue;
-          }
-          if (forest && roll < 0.22 && this.countType('wolf') < (this.mobile ? 3 : 6)) { this.groupSpawn('wolf', 2 + ((Math.random() * 2) | 0), x, y, z); return; }
-          if ((forest || snowy) && roll < 0.3 && this.countType('bear') < (this.mobile ? 1 : 2)) { this.spawn('bear', x + 0.5, y, z + 0.5, { wild: true, coat: snowy ? 2 : 0 }); return; }
-          if (roll < 0.5) { this.spawn('spider', x + 0.5, y, z + 0.5, { wild: true }); return; }
-          if (this.waterNear(x, y, z) && roll < 0.58 && this.countType('croc') < 2) { this.spawn('croc', x + 0.5, y, z + 0.5, { wild: true }); return; }
-          // zombies, sometimes a small horde
-          const horde = Math.random() < 0.3 ? 2 + ((Math.random() * (this.mobile ? 2 : 3)) | 0) : 1;
+          // zombies and predators come out by day too (spawn timer is slower by day and the cap is lower)
+          if (forest && roll < 0.22 && this.countType('wolf') < (this.mobile ? 3 : 6)) { this.groupSpawn('wolf', (night ? 2 : 1) + ((Math.random() * 2) | 0), x, y, z); return; }
+          if ((forest || snowy) && roll < 0.3 && this.countType('bear') < (this.mobile ? 1 : 2)) { this.spawn('bear', x + 0.5, y, z + 0.5, { wild: true, coat: snowy ? 2 : (night || Math.random() < 0.6 ? 0 : 1) }); return; }
+          if (roll < (night ? 0.5 : 0.42)) { this.spawn('spider', x + 0.5, y, z + 0.5, { wild: true }); return; }
+          if (this.waterNear(x, y, z) && roll < 0.6 && this.countType('croc') < (this.mobile ? 1 : 2)) { this.spawn('croc', x + 0.5, y, z + 0.5, { wild: true }); return; }
+          // zombies, sometimes a small horde (smaller by day)
+          const horde = Math.random() < (night ? 0.3 : 0.12) ? 2 + ((Math.random() * (this.mobile ? 2 : 3)) | 0) : 1;
           this.groupSpawn('zombie', horde, x, y, z); return;
         }
         // --- caves: a dark air pocket around the player's height (any time of day)
@@ -595,7 +596,7 @@ window.VC = window.VC || {};
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) { this.spawnTimer = 4 + Math.random() * 4; this.spawnNatural(player); }
       this.hostileTimer -= dt;
-      if (this.hostileTimer <= 0) { this.hostileTimer = daylight < 0.4 ? 1.5 + Math.random() * 2 : 3 + Math.random() * 4; this.spawnHostile(player); }
+      if (this.hostileTimer <= 0) { this.hostileTimer = daylight < 0.4 ? 1.5 + Math.random() * 2 : 3.5 + Math.random() * 4.5; this.spawnHostile(player); }
       this.fishTimer -= dt;
       if (this.fishTimer <= 0) { this.fishTimer = 2.5 + Math.random() * 3; this.spawnFish(player); }
       for (let i = this.list.length - 1; i >= 0; i--) {
@@ -613,27 +614,29 @@ window.VC = window.VC || {};
         m.model.root.visible = true;
         if (m.fish) { this.fishUpdate(m, dt, player); continue; }
         m.cd -= dt; m.attackAnim = Math.max(0, m.attackAnim - dt); m.hurtT = Math.max(0, m.hurtT - dt); if (m.angry > 0) m.angry -= dt;
+        if (m.breedCD > 0) m.breedCD -= dt;
+        if (m.baby) { m.age += dt; m.growT -= dt; if (m.growT <= 0) { m.growT = 1; if (m.age >= GROW) this.growUp(m); else this.applyScale(m); } }
         if (m.foeT > 0) { m.foeT -= dt; if (m.foeT <= 0 || (m.foe && m.foe.dead)) m.foe = null; }
         this.think(m, dt, player, dx, dz, dist);
         if (m.dead) continue;
         this.physics(m, dt);
         if (m.dead) continue;
         this.animate(m, dt);
-        // zombies burn in daylight
-        if (m.burns && this.daylight > 0.55 && m.skyB === 1) {
+        // zombies burn in daylight only when 'Daylight burning' is on (pause menu; off by default)
+        if (m.burns && this.burnDaylight && this.daylight > 0.55 && m.skyB === 1) {
           m.burnT -= dt;
           if (m.burnT <= 0) { m.burnT = 0.8; this.particle(fireTex, new THREE.Vector3(m.pos.x, m.pos.y + 0.6, m.pos.z), 3, 0.5, 1.4, 0.6); this.particle(puffTex, new THREE.Vector3(m.pos.x, m.pos.y + 1.8, m.pos.z), 1, 0.3, 0.9, 0.8); this.damage(m, 3, null, null); if (m.dead) continue; }
         }
         // tamed animals slowly heal
         if (m.tamed && m.hp < m.hpMax) { m.regenT += dt; if (m.regenT > 4) { m.regenT = 0; m.hp++; } }
         m.soundT -= dt;
-        if (m.soundT <= 0) { m.soundT = (m.hostile ? 6 : 15) + Math.random() * 30; if (this.sound && dist < 16 && m.type !== 'lion') playSound(m.type, (1 - dist / 16) * 0.6); }
+        if (m.soundT <= 0) { m.soundT = (m.hostile ? 6 : 15) + Math.random() * 30; if (this.sound && dist < 16 && m.type !== 'lion') playSound(m.type, (1 - dist / 16) * 0.6, m.pos); }
       }
       this.updateParticles(dt);
     }
     // ---- horses ----
     mount(m, player) {
-      if (!m.rideable || m.dead) return false;
+      if (!m.rideable || m.dead || m.baby) return false;
       for (const o of this.list) if (o.rider === player) o.rider = null;
       m.rider = player; m.tamed = true; m.wild = false; m.sitting = false; m.state = 'idle'; m.vel.set(0, 0, 0);
       m.model.parts.collar.visible = true; m.model.parts.rider.visible = true;
@@ -778,7 +781,14 @@ window.VC = window.VC || {};
         if (!m.engaged && (m.type === 'bear' || m.type === 'wolf') && chase === player && !stalking) { m.engaged = true; if (this.sound) playSound(m.type, 0.7); }
       } else {
         m.engaged = false;
-        if (m.sitting) { m.state = 'sit'; }
+        let mate = null;
+        if (m.love > 0) { m.love -= dt; m.loveP = (m.loveP || 0) - dt; if (m.loveP <= 0) { m.loveP = 0.9; this.particle(heartTex, new THREE.Vector3(m.pos.x, m.pos.y + m.h + 0.1, m.pos.z), 1, 0.4, 0.7, 1); } mate = this.findMate(m); }
+        if (mate) { // walk to the partner; breed when they meet
+          const tx = mate.pos.x - m.pos.x, tz = mate.pos.z - m.pos.z, td = Math.hypot(tx, tz);
+          m.state = 'walk'; m.timer = 1; m.dir = Math.atan2(tx, tz); speed = td > 1.2 ? m.speed * 1.8 : 0;
+          if (td < m.hw + mate.hw + 0.7 && Math.abs(mate.pos.y - m.pos.y) < 1.2) this.breed(m, mate);
+        }
+        else if (m.sitting) { m.state = 'sit'; }
         else if (m.tamed && m.stays) { // tamed horses wait where you left them, grazing now and then
           m.state = 'idle';
           if (m.timer <= 0) { m.timer = 2 + Math.random() * 5; m.graze = Math.random() < 0.5 ? 2 + Math.random() * 3 : 0; }
@@ -898,20 +908,26 @@ window.VC = window.VC || {};
         m.skyB = this.skyOpen(x, y, z) ? 1 : 0.35; m.blockB = L ? Math.pow(L / 15, 1.4) : 0;
       }
       const b = Math.max(0.12, Math.max((m.skyB || 1) * this.daylight, m.blockB || 0));
-      if (m.hurtT > 0) m.model.mat.color.setRGB(b * 1.3, b * 0.45, b * 0.45);
+      if (m.hurtT > 0.22) m.model.mat.color.setRGB(Math.max(1.6, b * 2.6), Math.max(1.6, b * 2.6), Math.max(1.6, b * 2.6)); // white hit flash
+      else if (m.hurtT > 0) m.model.mat.color.setRGB(b * 1.4, b * 0.4, b * 0.4);                                        // then red
       else m.model.mat.color.setScalar(b);
     }
-    damage(m, amount, fromPos, attacker) {
+    damage(m, amount, fromPos, attacker, knockMul) {
       if (m.dead) return;
-      m.hp -= amount; m.hurtT = 0.2;
+      m.hp -= amount; m.hurtT = 0.3;
       if (fromPos) {
         const dx = m.pos.x - fromPos.x, dz = m.pos.z - fromPos.z, d = Math.hypot(dx, dz) || 1;
-        const k = Math.min(9, 4 + amount * 0.4) * (m.type === 'bear' ? 0.5 : 1);
-        m.vel.x = dx / d * k; m.vel.z = dz / d * k; m.vel.y = Math.max(m.vel.y, 4.5); m.knock = 0.25;
+        const k = Math.min(10, 4 + amount * 0.4) * (m.type === 'bear' ? 0.5 : 1) * (knockMul != null ? knockMul : 1);
+        m.vel.x = dx / d * k; m.vel.z = dz / d * k; m.vel.y = Math.max(m.vel.y, 3 + 1.5 * Math.min(1.5, knockMul != null ? knockMul : 1)); m.knock = 0.25;
       }
+      if (attacker === 'player') this.particle(critTex, new THREE.Vector3(m.pos.x, m.pos.y + m.h * 0.6, m.pos.z), 4, Math.max(0.4, m.hw * 1.6), 1.6, 0.35);
       if (attacker === 'player' && m.neutral && !m.tamed) m.angry = 20; // provoked lions fight back
       if (attacker && typeof attacker === 'object' && attacker !== m && (m.hostile || m.tamed)) { m.foe = attacker; m.foeT = 6; } // fight back against pets / predators
-      if (this.sound) playSound(m.hostile ? m.type : 'hit', 0.5);
+      if (this.sound) {
+        const v = this.player ? Math.max(0, 1 - m.pos.distanceTo(this.player.pos) / 28) : 1;
+        VC.Audio.play(m.hp <= 0 ? 'mob_death' : 'mob_hurt', 0.6 * v, { pitch: (VOICE[m.type] || 1) * (m.baby ? 1.5 : 1) * (0.94 + Math.random() * 0.12), pos: m.pos, bus: 'mobs' });
+        if (m.hostile && m.hp > 0 && Math.random() < 0.3) playSound(m.type, 0.35 * v, m.pos);
+      }
       if (m.hp <= 0) {
         this.particle(puffTex, new THREE.Vector3(m.pos.x, m.pos.y + m.h * 0.5, m.pos.z), 8, 0.8, 0.7, 0.8);
         this.remove(m);
@@ -958,18 +974,69 @@ window.VC = window.VC || {};
       return msg;
     }
     // left-click / long-press: hit hostiles & wild lions, pet tamed animals, shoo wild dogs/cats
-    hit(m, fromPos) {
-      if (m.hostile || m.fish || (m.type === 'lion' && !m.tamed)) { this.damage(m, 5, fromPos, 'player'); return null; }
+    hit(m, fromPos, w) {
+      w = w || {};
+      if (m.hostile || m.fish || (m.type === 'lion' && !m.tamed)) { this.damage(m, w.dmg != null ? w.dmg : 3, fromPos, 'player', w.knock); return null; }
       if (m.rideable && !m.tamed) { this.particle(puffTex, new THREE.Vector3(m.pos.x, m.pos.y + 1.2, m.pos.z), 3, 0.5, 0.6, 0.6); m.dir = Math.atan2(m.pos.x - fromPos.x, m.pos.z - fromPos.z); m.state = 'walk'; m.timer = 2.5; m.speed = TYPES.horse.run; setTimeout(() => { m.speed = TYPES.horse.speed; }, 2500); if (this.sound) playSound('horse', 0.5); return null; } // wild horses bolt
       if (m.tamed) { this.particle(heartTex, new THREE.Vector3(m.pos.x, m.pos.y + m.h, m.pos.z), 2, 0.4, 0.8, 1); if (this.sound) playSound(m.type, 0.5); return null; }
       this.particle(puffTex, new THREE.Vector3(m.pos.x, m.pos.y + 0.3, m.pos.z), 6, 0.6, 0.6, 0.7);
       this.remove(m);
       return 'Shooed away';
     }
-    serialize() { return this.list.filter(m => !m.hostile && (m.tamed || !m.wild) && !(m.fish && !m.inWater)).map(m => ({ t: m.type, c: m.coat, x: +m.pos.x.toFixed(2), y: +m.pos.y.toFixed(2), z: +m.pos.z.toFixed(2), r: +m.yaw.toFixed(2), tm: m.tamed ? 1 : 0, s: m.sitting ? 1 : 0, hp: m.hp })); }
-    load(arr) { for (const o of arr || []) if (COATS[o.t] && !TYPES[o.t].hostile) this.spawn(o.t, o.x, o.y, o.z, { coat: o.c, yaw: o.r, tamed: !!o.tm, sitting: !!o.s, wild: false, hp: o.hp }); }
+    // ---- feeding, taming with food, love mode & babies ----
+    tameIt(m) {
+      m.tamed = true; m.wild = false; m.angry = 0;
+      if (!m.rideable) { m.sitting = false; m.state = 'follow'; }
+      m.model.parts.collar.visible = !(m.baby && m.rideable);
+    }
+    // returns a message for the player, or null when this animal doesn't eat that food
+    feed(m, d) {
+      const f = d && d.food;
+      if (!f || m.dead || m.hostile || m.fish || !f.feeds || !f.feeds.includes(m.type)) return null;
+      const nm = this.name(m), top = new THREE.Vector3(m.pos.x, m.pos.y + m.h + 0.1, m.pos.z);
+      if (m.angry > 0 && !m.tamed) return 'The ' + nm.toLowerCase() + ' is too angry to eat!';
+      if (this.sound) { VC.Audio.play('eat', 0.6, { pos: m.pos, pitch: m.baby ? 1.3 : 1 }); if (m.type !== 'lion') playSound(m.type, 0.45, m.pos); }
+      const hurt = m.hp < m.hpMax; m.hp = Math.min(m.hpMax, m.hp + (f.heal || 2));
+      m.vel.x = m.vel.z = 0; m.graze = m.rideable ? 1.2 : 0;
+      if (!m.tamed) {
+        m.feeds++;
+        if (m.feeds >= 3 || Math.random() < 0.4) {
+          this.tameIt(m); this.particle(heartTex, top, 5, 0.6, 0.8, 1.3); if (this.sound) VC.Audio.play('love', 0.5);
+          return nm + ' tamed with ' + d.name.toLowerCase() + '!' + (m.rideable ? ' Right-click / tap it to ride.' : m.protect ? ' It will follow and protect you.' : ' It will follow you.');
+        }
+        this.particle(puffTex, top, 3, 0.4, 0.6, 0.6); this.particle(heartTex, top, 1, 0.3, 0.8, 1);
+        return 'The ' + nm.toLowerCase() + ' liked that. Keep feeding it to tame it.';
+      }
+      this.particle(heartTex, top, 3, 0.5, 0.8, 1.2);
+      if (m.baby) { m.age = Math.min(GROW, m.age + GROW * 0.1); this.applyScale(m); return 'The baby ' + nm.toLowerCase() + ' ate it and grew a little.'; }
+      if (hurt) { if (this.sound) VC.Audio.play('heal', 0.4); return nm + ' healed (' + Math.ceil(m.hp / 2) + '/' + Math.ceil(m.hpMax / 2) + ' ❤).'; }
+      if (m.rider) return 'Your horse munches happily.';
+      if (m.breedCD > 0) return nm + ' is not ready for another baby yet.';
+      m.love = 30; m.loveP = 0; m.sitting = false; if (this.sound) VC.Audio.play('love', 0.5);
+      return nm + ' is in love ❤ — feed another tamed ' + nm.toLowerCase() + ' nearby for a baby!';
+    }
+    findMate(m) {
+      let best = null, bd = 10;
+      for (const o of this.list) {
+        if (o === m || o.type !== m.type || !o.tamed || o.baby || o.love <= 0 || o.dead || o.rider) continue;
+        const d = o.pos.distanceTo(m.pos); if (d < bd) { bd = d; best = o; }
+      }
+      return best;
+    }
+    breed(a, b) {
+      a.love = b.love = 0; a.breedCD = b.breedCD = 60;
+      const x = (a.pos.x + b.pos.x) / 2, z = (a.pos.z + b.pos.z) / 2, y = Math.max(a.pos.y, b.pos.y) + 0.05;
+      const baby = this.spawn(a.type, x, y, z, { tamed: true, wild: false, baby: true, coat: Math.random() < 0.5 ? a.coat : b.coat, yaw: Math.random() * Math.PI * 2 });
+      this.particle(heartTex, new THREE.Vector3(x, y + 1, z), 6, 0.8, 0.9, 1.4);
+      if (baby && this.sound) VC.Audio.play('pop', 0.5, { pos: baby.pos });
+      if (this.onBreed) this.onBreed(baby, a);
+      return baby;
+    }
+    growUp(m) { m.baby = false; m.age = GROW; this.applyScale(m); if (m.tamed) m.model.parts.collar.visible = true; if (this.onGrow) this.onGrow(m); }
+    serialize() { return this.list.filter(m => !m.hostile && (m.tamed || !m.wild) && !(m.fish && !m.inWater)).map(m => ({ t: m.type, c: m.coat, x: +m.pos.x.toFixed(2), y: +m.pos.y.toFixed(2), z: +m.pos.z.toFixed(2), r: +m.yaw.toFixed(2), tm: m.tamed ? 1 : 0, s: m.sitting ? 1 : 0, hp: m.hp, b: m.baby ? Math.round(m.age) : undefined })); }
+    load(arr) { for (const o of arr || []) if (COATS[o.t] && !TYPES[o.t].hostile) this.spawn(o.t, o.x, o.y, o.z, { coat: o.c, yaw: o.r, tamed: !!o.tm, sitting: !!o.s, wild: false, hp: o.hp, baby: o.b != null, age: o.b || 0 }); }
   }
 
-  VC.Mobs = Mobs; VC.MobSounds = VC.Sound = { play: playSound, unlock: audio };
-  VC.Particles = { puffTex };
+  VC.Mobs = Mobs; VC.MobSounds = VC.Sound = { play: (n, v, o) => VC.Audio.play(n, v, o), unlock: () => VC.Audio.unlock() };
+  VC.Particles = { puffTex, heartTex, critTex };
 })();

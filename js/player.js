@@ -116,6 +116,7 @@ window.VC = window.VC || {};
       const sprint = R ? (k.ControlLeft || k.ControlRight || this.touchSprint) : (k.ShiftLeft && !this.flying || k.ControlLeft || k.ControlRight || k.ShiftRight || this.touchSprint);
       let speed = this.flying ? (sprint ? 22 : 11) : R ? (sprint && fwd > 0 ? 10.5 : fwd < 0 ? 3 : 6.2) : sprint && fwd > 0 ? 5.8 : 4.3;
       if (R && this.inWater) speed = 2.4; // horses swim slowly
+      if (this.slow && this.slow < 1 && !this.flying) speed *= this.slow; // drawing a bow
       if (this.inWater && !this.flying) speed *= 0.55;
       if (this.inLava && !this.flying) speed *= 0.3;
       const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);

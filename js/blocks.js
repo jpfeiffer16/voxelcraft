@@ -19,6 +19,8 @@ window.VC = window.VC || {};
     door_item: 81, iron_door_item: 82, bed_item: 83, bucket: 84, water_bucket: 85, lava_bucket: 86,
     wolf_egg: 87, bear_egg: 88, spider_egg: 89, croc_egg: 90, zombie_egg: 91, water_flow: 92, iron_block: 93,
     horse_egg: 94, cod_egg: 95, salmon_egg: 96, tropical_egg: 97, puffer_egg: 98,
+    wood_sword: 99, stone_sword: 100, iron_sword: 101, diamond_sword: 102, iron_axe: 103, bow: 104, bow_pull: 105, arrow: 106, trident: 107,
+    steak: 108, bone: 109, cooked_cod: 110, apple: 111, carrot: 112, wheat: 113,
   };
   const B = {
     AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, WATER: 5, LOG: 6, LEAVES: 7, GLASS: 8, PLANKS: 9,
@@ -38,6 +40,8 @@ window.VC = window.VC || {};
     DOG_EGG: 200, CAT_EGG: 201, LION_EGG: 202, OAK_DOOR_ITEM: 203, IRON_DOOR_ITEM: 204, BED_ITEM: 205,
     WATER_BUCKET: 206, LAVA_BUCKET: 207, BUCKET: 208, WOLF_EGG: 209, BEAR_EGG: 210, SPIDER_EGG: 211, CROC_EGG: 212, ZOMBIE_EGG: 213,
     HORSE_EGG: 214, COD_EGG: 215, SALMON_EGG: 216, TROPICAL_EGG: 217, PUFFER_EGG: 218,
+    WOOD_SWORD: 219, STONE_SWORD: 220, IRON_SWORD: 221, DIAMOND_SWORD: 222, IRON_AXE: 223, BOW: 224, TRIDENT: 225,
+    STEAK: 226, BONE: 227, COOKED_COD: 228, APPLE: 229, CARROT: 230, WHEAT: 231,
   };
   const defs = [];
   function def(id, name, tex, opts = {}) {
@@ -144,6 +148,24 @@ window.VC = window.VC || {};
   def(B.SALMON_EGG, 'Salmon Spawn Egg', T.salmon_egg, { render: 'item', solid: false, egg: 'salmon', fishEgg: true });
   def(B.TROPICAL_EGG, 'Tropical Fish Spawn Egg', T.tropical_egg, { render: 'item', solid: false, egg: 'tropical', fishEgg: true });
   def(B.PUFFER_EGG, 'Pufferfish Spawn Egg', T.puffer_egg, { render: 'item', solid: false, egg: 'puffer', fishEgg: true });
+  // ---- weapons. dmg: melee damage (half-hearts), cd: seconds between hits, reach: blocks, knock: knockback multiplier
+  const W = (id, name, tile, w) => def(id, name, tile, { render: 'item', solid: false, weapon: w });
+  W(B.WOOD_SWORD, 'Wooden Sword', T.wood_sword, { kind: 'sword', dmg: 4, cd: 0.45, reach: 5, knock: 1 });
+  W(B.STONE_SWORD, 'Stone Sword', T.stone_sword, { kind: 'sword', dmg: 5, cd: 0.45, reach: 5, knock: 1 });
+  W(B.IRON_SWORD, 'Iron Sword', T.iron_sword, { kind: 'sword', dmg: 6, cd: 0.45, reach: 5, knock: 1.1 });
+  W(B.DIAMOND_SWORD, 'Diamond Sword', T.diamond_sword, { kind: 'sword', dmg: 8, cd: 0.45, reach: 5, knock: 1.2 });
+  W(B.IRON_AXE, 'Iron Axe', T.iron_axe, { kind: 'axe', dmg: 7, cd: 0.85, reach: 5, knock: 1.5 });
+  W(B.BOW, 'Bow (hold to draw, release to shoot)', T.bow, { kind: 'bow', dmg: 2, cd: 0.35, reach: 5, knock: 0.6, ranged: 'arrow', drawTime: 1.0, shotDmg: [2, 9] });
+  W(B.TRIDENT, 'Trident (hold to throw; it comes back)', T.trident, { kind: 'trident', dmg: 7, cd: 0.7, reach: 6.5, knock: 1.1, ranged: 'trident', drawTime: 0.8, shotDmg: [4, 9] });
+  // ---- food. feeds: animals that love it (heal / tame / breed); heal: how much it heals them; eat: half-hearts it gives you
+  const F = (id, name, tile, f) => def(id, name, tile, { render: 'item', solid: false, food: f });
+  F(B.STEAK, 'Steak', T.steak, { feeds: ['dog', 'lion'], heal: 6, eat: 8 });
+  F(B.BONE, 'Bone', T.bone, { feeds: ['dog'], heal: 2, eat: 0 });
+  F(B.COOKED_COD, 'Cooked Fish', T.cooked_cod, { feeds: ['cat'], heal: 4, eat: 5 });
+  F(B.APPLE, 'Apple', T.apple, { feeds: ['horse'], heal: 4, eat: 4 });
+  F(B.CARROT, 'Carrot', T.carrot, { feeds: ['horse'], heal: 3, eat: 3 });
+  F(B.WHEAT, 'Wheat', T.wheat, { feeds: ['horse'], heal: 2, eat: 0 });
+  defs[B.HAY].food = { feeds: ['horse'], heal: 10, eat: 0 }; // hay bales are still blocks, but horses love them
 
   const N = 256;
   // Fast lookup tables
@@ -170,6 +192,8 @@ window.VC = window.VC || {};
   // building / survival items first
   ORDER.splice(1, 0, B.BED_ITEM, B.OAK_DOOR_ITEM, B.IRON_DOOR_ITEM, B.GLASS_PANE, B.OAK_WINDOW, B.STAINED_BLUE, B.STAINED_AMBER,
     B.WATER_BUCKET, B.LAVA_BUCKET, B.BUCKET);
+  ORDER.splice(0, 0, B.WOOD_SWORD, B.STONE_SWORD, B.IRON_SWORD, B.DIAMOND_SWORD, B.IRON_AXE, B.BOW, B.TRIDENT,
+    B.STEAK, B.BONE, B.COOKED_COD, B.APPLE, B.CARROT, B.WHEAT);
   ORDER.splice(ORDER.indexOf(B.LION_EGG) + 1, 0, B.HORSE_EGG, B.COD_EGG, B.SALMON_EGG, B.TROPICAL_EGG, B.PUFFER_EGG, B.WOLF_EGG, B.BEAR_EGG, B.SPIDER_EGG, B.CROC_EGG, B.ZOMBIE_EGG);
 
   // ---- shapes (units of 1/16) for doors, beds, panes: used for rendering and collision ----

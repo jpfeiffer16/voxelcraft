@@ -82,6 +82,7 @@
       if (joy && t.identifier === joy.id) { joy = null; joyHome(); player().analog.x = 0; player().analog.y = 0; continue; }
       const L = looks.get(t.identifier); if (!L) continue;
       looks.delete(t.identifier);
+      if (L.charging) { game.useEnd(); continue; } // long-press with a bow / trident: release to shoot
       // quick tap without dragging -> place block at the crosshair
       if (!L.moved && !L.breaking && performance.now() - L.t < 300 && game.state === 'playing') game.placeBlock();
     }
@@ -106,7 +107,9 @@
   hold('tb-down', () => { player().keys.ShiftLeft = true; }, () => { player().keys.ShiftLeft = false; });
   hold('tb-break', () => { game.breakBlock(); holdBreak = true; breakTimer = 0.3; }, () => { holdBreak = false; });
   let placeRepeat = false, placeTimer = 0;
-  hold('tb-place', () => { game.placeBlock(); placeRepeat = true; placeTimer = 0.35; }, () => { placeRepeat = false; });
+  hold('tb-place', () => { if (game.heldRanged()) { game.useStart(); return; } game.placeBlock(); placeRepeat = true; placeTimer = 0.35; }, () => { placeRepeat = false; game.useEnd(); });
+  hold('tb-fire', () => { game.useStart(); }, () => { game.useEnd(); }); // bow / trident: hold to draw, release to shoot
+  hold('tb-mute', () => { game.setMuted(game.settings.sound); game.toast(game.settings.sound ? 'Sound on' : 'Sound muted'); });
   const sprintBtn = hold('tb-sprint', () => { const p = player(); p.touchSprint = !p.touchSprint; sprintBtn.classList.toggle('on', p.touchSprint); });
   const flyBtn = hold('tb-fly', () => { game.toggleFly(); });
   hold('tb-dismount', () => { game.dismount(); });
@@ -324,6 +327,9 @@
     if (steer && settings.tilt) { const dz = 0.15, r = Math.abs(steer); if (r > dz) p.yaw += Math.sign(steer) * Math.min(1, r - dz) * 2.2 * (settings.tiltSens / 10) * dt; }
     // long-press on the world = break (repeats while held)
     for (const L of looks.values()) {
+      // holding a bow / trident: a long press on the view draws it (drag to aim), lifting the finger shoots
+      if (!L.moved && !L.charging && !L.breaking && now - L.t > 220 && game.heldRanged() && !(game.targetMob && !game.targetMob.hostile)) { L.charging = game.useStart(); if (L.charging) continue; }
+      if (L.charging) continue;
       if (!L.moved && now - L.t > 380) {
         if (!L.breaking) { L.breaking = true; L.next = 0; }
         L.next -= dt; if (L.next <= 0) { game.breakBlock(); L.next = 0.3; if (navigator.vibrate) try { navigator.vibrate(12); } catch (e) {} }

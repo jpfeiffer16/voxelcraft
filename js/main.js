@@ -12,7 +12,8 @@
   window.addEventListener('error', (e) => { const el = $('error'); el.classList.remove('hidden'); el.textContent += (e.message || e) + '\n'; });
 
   // ---------- settings ----------
-  const settings = Object.assign({ renderDistance: MOBILE ? 4 : 8, sensitivity: 8, fov: MOBILE ? 70 : 75, showDebug: !MOBILE, tilt: true, tiltSens: 10, lookSens: 10, sound: true, hostile: true }, safeParse(localStorage.getItem(SETTINGS_KEY)) || {});
+  const settings = Object.assign({ renderDistance: MOBILE ? 4 : 8, sensitivity: 8, fov: MOBILE ? 70 : 75, showDebug: !MOBILE, tilt: true, tiltSens: 10, lookSens: 10, sound: true, hostile: true, daylightBurn: false }, safeParse(localStorage.getItem(SETTINGS_KEY)) || {});
+  settings.vol = Object.assign({ master: 80, music: 40, effects: 80, mobs: 80 }, settings.vol || {});
   function safeParse(s) { try { return s ? JSON.parse(s) : null; } catch (e) { return null; } }
   function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {} }
 
@@ -83,8 +84,9 @@
   let world = null, player = null;
   let state = 'title'; // title | playing | paused | inventory | dead
   let worldTime = 0.05;
-  let hotbar = [B.GRASS, B.PLANKS, B.COBBLE, B.OAK_DOOR_ITEM, B.GLASS_PANE, B.BED_ITEM, B.TORCH, B.TNT, B.HORSE_EGG];
-  let mobs = null, tnt = null, fluids = null, spawnPoint = null;
+  let hotbar = [B.IRON_SWORD, B.BOW, B.GRASS, B.PLANKS, B.COBBLE, B.TORCH, B.OAK_DOOR_ITEM, B.STEAK, B.HORSE_EGG];
+  let mobs = null, tnt = null, fluids = null, spawnPoint = null, proj = null;
+  const held = new VC.Weapons.Held(atlas, tex);
   let selected = 0;
   let saveTimer = 0, dirtySave = false;
   const testMode = /[?&]test=1/.test(location.search);
@@ -124,7 +126,15 @@
     if (mobs) mobs.dispose();
     mobs = new VC.Mobs(scene, world, { max: MOBILE ? 10 : 20, maxWild: MOBILE ? 4 : 6, maxHostile: MOBILE ? 7 : 16, maxFish: MOBILE ? 6 : 16, maxWildLions: MOBILE ? 1 : 2, mobile: MOBILE });
     fluids = new VC.Fluids(world, { maxPerTick: MOBILE ? 48 : 96 });
-    mobs.sound = settings.sound; mobs.hostile = settings.hostile !== false;
+    mobs.sound = settings.sound; mobs.hostile = settings.hostile !== false; mobs.burnDaylight = !!settings.daylightBurn;
+    mobs.onBreed = (baby, parent) => { if (baby) { toast('A baby ' + mobs.name(baby).toLowerCase() + ' was born! ❤'); dirtySave = true; } else toast('Too many animals for a baby (max ' + mobs.max + ')'); };
+    mobs.onGrow = (m) => { if (m.pos.distanceTo(player.pos) < 24) toast('Your ' + mobs.name(m).toLowerCase() + ' has grown up!'); dirtySave = true; };
+    if (proj) proj.dispose();
+    proj = new VC.Weapons.Projectiles(scene, world, { max: MOBILE ? 20 : 40 }); proj.mobs = mobs;
+    proj.onHitMob = onProjectileHit;
+    proj.onBlock = (p) => { VC.Audio.play(p.kind === 'trident' ? 'axe_hit' : 'arrow_block', 0.7 * VC.Audio.at(p.pos, 32), { pos: p.pos }); };
+    proj.onReturn = () => { VC.Audio.play('trident_return', 0.45); held.equip = 0.6; };
+    held.hidden = false; charge.on = false;
     mobs.onPlayerDamage = (amt, m) => { if (!settings.hostile) return; player.lastCause = 'mob'; if (player.hurt(amt, m.pos, m, 5)) onHurt(); };
     if (tnt) tnt.dispose();
     tnt = new VC.Explosives(scene, world, tex, { maxPrimed: MOBILE ? 10 : 20, perFrame: MOBILE ? 1 : 2, maxParticles: MOBILE ? 140 : 260 });
@@ -314,7 +324,10 @@
   });
 
   $('btn-play').addEventListener('click', () => { if (window.game && window.game.mobile) window.game.mobile.beforePlay(); play(); }); // tilt permission must be requested first, synchronously (iOS)
-  document.addEventListener('pointerdown', () => { if (settings.sound) VC.MobSounds.unlock(); }, { once: true });
+  // Audio starts on the first tap / click / key press (mobile browsers only allow sound after a user gesture)
+  VC.Audio.setVolumes(settings.vol); VC.Audio.setMuted(!settings.sound);
+  const unlockAudio = () => { if (settings.sound && !VC.Audio.unlocked) VC.Audio.unlock(); };
+  for (const ev of ['pointerdown', 'touchstart', 'touchend', 'mousedown', 'keydown', 'click']) document.addEventListener(ev, unlockAudio, { capture: true, passive: true });
   $('btn-new').addEventListener('click', () => {
     if (window.game && window.game.mobile) window.game.mobile.beforePlay(); 
     const s = $('seed').value;
@@ -328,7 +341,28 @@
   $('btn-title').addEventListener('click', () => { saveGame(); setState('title'); });
   $('btn-inv-done').addEventListener('click', play);
   $('btn-inv-close').addEventListener('click', play);
-  { const chk = $('chk-sound'); chk.checked = settings.sound; chk.addEventListener('change', () => { settings.sound = chk.checked; if (mobs) mobs.sound = chk.checked; if (tnt) tnt.sound = chk.checked; saveSettings(); if (chk.checked) MobSounds.unlock(); }); }
+  function setMuted(m) {
+    settings.sound = !m; VC.Audio.setMuted(!!m); if (mobs) mobs.sound = !m; if (tnt) tnt.sound = !m; saveSettings();
+    if (!m) { VC.Audio.unlock(); VC.Audio.play('click', 0.8); }
+    updateMuteUi();
+  }
+  function updateMuteUi() {
+    $('btn-mute').textContent = settings.sound ? '🔊 Sound: on (M to mute)' : '🔇 Sound: muted (M to unmute)';
+    $('btn-mute').classList.toggle('muted', !settings.sound);
+    const tb = $('tb-mute'); if (tb) { tb.textContent = settings.sound ? '🔊' : '🔇'; tb.classList.toggle('on', !settings.sound); }
+  }
+  $('btn-mute').addEventListener('click', () => setMuted(settings.sound));
+  updateMuteUi();
+  { let lastPing = 0;
+    for (const [id, key, ping] of [['volMaster', 'master', 'pop'], ['volMusic', 'music', null], ['volEffects', 'effects', 'pop'], ['volMobs', 'mobs', 'cat']]) {
+      const el = $(id), val = $(id + '-val');
+      el.value = settings.vol[key]; val.textContent = settings.vol[key];
+      el.addEventListener('input', () => {
+        settings.vol[key] = +el.value; val.textContent = el.value; VC.Audio.setVolumes(settings.vol); saveSettings();
+        const now = performance.now(); if (ping && now - lastPing > 350) { lastPing = now; VC.Audio.unlock(); VC.Audio.play(ping, 0.7); }
+      });
+    } }
+  { const chk = $('chk-burn'); chk.checked = !!settings.daylightBurn; chk.addEventListener('change', () => { settings.daylightBurn = chk.checked; if (mobs) mobs.burnDaylight = chk.checked; saveSettings(); }); }
   { const chk = $('chk-hostile'); chk.checked = settings.hostile !== false; chk.addEventListener('change', () => { setHostile(chk.checked); }); }
   function setHostile(on) { settings.hostile = !!on; $('chk-hostile').checked = !!on; saveSettings(); if (mobs) mobs.setHostile(!!on); }
   $('btn-respawn').addEventListener('click', respawn);
@@ -381,16 +415,21 @@
     if (state !== 'playing') return;
     if (!testMode && document.pointerLockElement !== canvas) { lockPointer(); return; } // a mouse click captures the mouse (also in touch mode)
     if (e.button === 0) { mouse.left = true; mouse.timer = 0.25; breakBlock(); }
-    else if (e.button === 2) { mouse.right = true; mouse.timer = 0.25; placeBlock(); }
+    else if (e.button === 2) {
+      // bow / trident: hold the right button to draw, release to shoot (unless you're aiming at an animal to feed / ride)
+      if (heldRanged() && !(targetMob && !targetMob.hostile)) { if (useStart()) { mouse.charging = true; return; } }
+      mouse.right = true; mouse.timer = 0.25; placeBlock();
+    }
     else if (e.button === 1) { e.preventDefault(); pickBlock(); }
   });
-  document.addEventListener('mouseup', (e) => { if (e.button === 0) mouse.left = false; if (e.button === 2) mouse.right = false; });
+  document.addEventListener('mouseup', (e) => { if (e.button === 0) mouse.left = false; if (e.button === 2) { mouse.right = false; if (mouse.charging) { mouse.charging = false; useEnd(); } } });
   document.addEventListener('contextmenu', (e) => e.preventDefault());
   document.addEventListener('wheel', (e) => { if (state === 'playing') select(selected + (e.deltaY > 0 ? 1 : -1)); }, { passive: true });
   document.addEventListener('keydown', (e) => {
     if (e.target && e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
     if (e.code === 'F3') { e.preventDefault(); settings.showDebug = !settings.showDebug; saveSettings(); show('hud', state !== 'title' && settings.showDebug); return; }
     if (e.code === 'KeyT' && !e.repeat && !e.ctrlKey && !e.metaKey) { VC.touchMode.toggle(); return; }
+    if (e.code === 'KeyM' && !e.repeat && !e.ctrlKey && !e.metaKey && state !== 'title') { setMuted(settings.sound); toast(settings.sound ? 'Sound on' : 'Sound muted'); return; }
     if (e.code === 'KeyE') {
       if (state === 'playing') { setState('inventory'); if (document.pointerLockElement) document.exitPointerLock(); }
       else if (state === 'inventory') play();
@@ -484,13 +523,80 @@
     for (const [dx, dz, id] of [[1, 0, B.TORCH_PX], [-1, 0, B.TORCH_NX], [0, 1, B.TORCH_PZ], [0, -1, B.TORCH_NZ]])
       if (world.getBlock(x + dx, y, z + dz) === id) world.setBlock(x + dx, y, z + dz, B.AIR);
   }
+  // ---------- weapons ----------
+  const FIST = { kind: 'fist', dmg: 3, cd: 0.35, reach: 5, knock: 1 };
+  const heldDef = () => defs[hotbar[selected]];
+  const weaponOf = (d) => (d && d.weapon) || FIST;
+  const heldRanged = () => { const w = weaponOf(heldDef()); return w.ranged ? w : null; };
+  const HIT_SOUND = { fist: 'punch', sword: 'sword_hit', axe: 'axe_hit', trident: 'sword_hit', bow: 'punch' };
+  const charge = { on: false, t: 0, w: null };
+  let lastShot = 0;
+  function attack(m) {
+    const w = weaponOf(heldDef()), now = performance.now();
+    if (now - lastAttack < w.cd * 1000) return; lastAttack = now; // attack cooldown (held buttons repeat)
+    held.swing();
+    const fights = m.hostile || m.fish || (m.type === 'lion' && !m.tamed);
+    const msg = mobs.hit(m, player.pos, { dmg: w.dmg, knock: w.knock }); if (msg) toast(msg);
+    VC.Audio.play(fights ? HIT_SOUND[w.kind] || 'punch' : 'swing', 0.65, { pos: m.pos, pitch: 0.95 + Math.random() * 0.1 });
+    dirtySave = true;
+  }
+  function useStart() {
+    const w = heldRanged(); if (!w || player.dead || state !== 'playing' || charge.on) return false;
+    if (w.ranged === 'trident' && proj.tridentOut()) { toast('Your trident is still on its way back'); return false; }
+    charge.on = true; charge.t = 0; charge.w = w; held.charge = 0;
+    VC.Audio.play(w.ranged === 'arrow' ? 'bow_draw' : 'swing', w.ranged === 'arrow' ? 0.6 : 0.3, { pitch: w.ranged === 'arrow' ? 1 : 0.6 });
+    return true;
+  }
+  function useEnd(cancel) {
+    if (!charge.on) return false;
+    charge.on = false; const w = charge.w, power = Math.min(1, charge.t / w.drawTime); held.charge = 0;
+    if (cancel || power < 0.12 || player.dead) return false;
+    fire(w, power); return true;
+  }
+  function fire(w, power) {
+    const q = camera.quaternion, dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q), right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+    const o = camera.position.clone().addScaledVector(dir, 0.3).addScaledVector(right, 0.1); o.y -= 0.1;
+    const p = proj.shoot(w.ranged, o, dir, power);
+    p.dmg = Math.round(w.shotDmg[0] + (w.shotDmg[1] - w.shotDmg[0]) * power);
+    VC.Audio.play(w.ranged === 'arrow' ? 'bow_twang' : 'trident_throw', 0.7, { pitch: 0.9 + power * 0.2 });
+    if (w.ranged === 'trident') held.swing();
+    lastShot = performance.now();
+  }
+  function quickShot() { // a quick tap with a bow / trident (touch): a half-strength shot
+    const w = heldRanged(); if (!w || performance.now() - lastShot < 550 || charge.on) return;
+    if (w.ranged === 'trident' && proj.tridentOut()) { toast('Your trident is still on its way back'); return; }
+    fire(w, 0.45);
+  }
+  function onProjectileHit(m, p) {
+    if (m.rider || m.dead) return false;
+    const dir = p.vel.clone().setY(0); if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1); dir.normalize();
+    const from = m.pos.clone().addScaledVector(dir, -1);
+    const msg = mobs.hit(m, from, { dmg: p.dmg || 4, knock: p.kind === 'trident' ? 1.1 : 0.7 });
+    VC.Audio.play('arrow_hit', 0.75 * Math.max(0.25, VC.Audio.at(m.pos, 40)), { pos: m.pos });
+    if (msg) toast(msg);
+    dirtySave = true; return true;
+  }
+  // ---------- food ----------
+  let eatUntil = 0;
+  function eat(d) {
+    const f = d.food; if (!f || !f.eat) return false;
+    if (performance.now() < eatUntil) return true;
+    if (player.health >= player.maxHealth) { toast("You're full — feed it to an animal instead"); return true; }
+    eatUntil = performance.now() + 1100; held.eatT = 1.05;
+    player.health = Math.min(player.maxHealth, player.health + f.eat); updateHearts(true);
+    VC.Audio.play('eat', 0.7, { pitch: 0.95 + Math.random() * 0.1 }); VC.Audio.play('burp', 0.35, { delay: 0.75 });
+    toast('Ate ' + d.name.toLowerCase() + ' (+' + (f.eat / 2) + ' ❤)');
+    return true;
+  }
   function breakBlock() {
-    if (targetMob) {
-      const now = performance.now(); if (now - lastAttack < 380) return; lastAttack = now; // attack cooldown (held buttons repeat)
-      const msg = mobs.hit(targetMob, player.pos); if (msg) toast(msg); targetMob = null; dirtySave = true; return;
+    if (targetMob) { attack(targetMob); targetMob = null; return; }
+    if (!target || target.id === B.BEDROCK) {
+      const w = weaponOf(heldDef()), now = performance.now();
+      if (!target && now - lastAttack > w.cd * 1000) { lastAttack = now; held.swing(); VC.Audio.play('swing', w.kind === 'fist' ? 0.2 : 0.35, { pitch: w.kind === 'axe' ? 0.8 : 1 }); }
+      return;
     }
-    if (!target || target.id === B.BEDROCK) return;
     const bid = target.id;
+    held.swing(); VC.Audio.blockSound('break', bid, { x: target.x + 0.5, y: target.y + 0.5, z: target.z + 0.5 });
     world.setBlock(target.x, target.y, target.z, B.AIR);
     breakPartner(target.x, target.y, target.z, bid);
     removeUnsupported(target.x, target.y, target.z);
@@ -535,15 +641,26 @@
     if (!m) toast('Too many fish (max ' + mobs.maxFish + ')'); else { toast(mobs.name(m) + ' released'); if (settings.sound) VC.Sound.play('splash', 0.5); dirtySave = true; }
   }
   function placeBlock() {
-    if (MobSounds) MobSounds.unlock();
+    unlockAudio();
+    const hd = heldDef();
     if (targetMob) {
-      if (targetMob.rideable && !player.mount && !player.keys.ShiftLeft) { mountHorse(targetMob); return; }
+      // food in hand: feed the animal (heals, tames, love mode -> babies)
+      if (hd && hd.food) { const msg = mobs.feed(targetMob, hd); if (msg) { toast(msg); held.swing(); dirtySave = true; return; } }
+      if (targetMob.rideable && !player.mount && !player.keys.ShiftLeft) {
+        if (targetMob.baby) { toast('This foal is too young to ride — it will grow up'); return; }
+        mountHorse(targetMob); return;
+      }
       const msg = mobs.interact(targetMob); if (msg) toast(msg); dirtySave = true; return;
     }
-    { const hd = defs[hotbar[selected]]; if (hd && hd.fishEgg) { placeFish(hd); return; } }
+    if (hd && hd.fishEgg) { placeFish(hd); return; }
+    if (hd && hd.weapon) { if (hd.weapon.ranged) quickShot(); return; } // weapons never place anything
+    if (hd && hd.food && hd.render === 'item') {
+      const usable = target && !player.keys.ShiftLeft && (BL.doorInfo(target.id) || BL.bedInfo(target.id) || target.id === B.TNT);
+      if (!usable) { if (!eat(hd)) toast('Feed the ' + hd.name.toLowerCase() + ' to a ' + hd.food.feeds.join(' or ') + ' — aim at it'); return; }
+    }
     if (!target) return;
-    const held = defs[hotbar[selected]];
-    if (held && held.places === 'bucket') { const k = scoopFluid(); toast(k === 1 ? 'Scooped up water' : k === 2 ? 'Scooped up lava' : 'Aim at a water or lava source'); return; }
+    const hdef = defs[hotbar[selected]];
+    if (hdef && hdef.places === 'bucket') { const k = scoopFluid(); toast(k === 1 ? 'Scooped up water' : k === 2 ? 'Scooped up lava' : 'Aim at a water or lava source'); return; }
     if (!player.keys.ShiftLeft) {
       if (BL.doorInfo(target.id)) { toggleDoor(target.x, target.y, target.z, target.id); return; }
       if (BL.bedInfo(target.id)) { useBed(target.x, target.y, target.z, target.id); return; }
@@ -575,16 +692,17 @@
       if (!free(x, y + 1, z) || !support(x, y - 1, z)) { toast('A door needs 2 free blocks on solid ground'); return; }
       if (player.intersectsBlock(x, y, z) || player.intersectsBlock(x, y + 1, z)) return;
       world.setBlock(x, y, z, BL.doorId(d.base, f, false, false)); world.setBlock(x, y + 1, z, BL.doorId(d.base, f, false, true));
-      dirtySave = true; return;
+      placed(world.getBlock(x, y, z), x, y, z); dirtySave = true; return;
     }
     if (d.places === 'bed') {
       const f = BL.facingFromYaw(player.yaw), [dx, dz] = DIRS[f];
       if (!free(x + dx, y, z + dz) || !support(x, y - 1, z) || !support(x + dx, y - 1, z + dz)) { toast('A bed needs 2 free blocks on solid ground'); return; }
       if (player.intersectsBlock(x, y, z) || player.intersectsBlock(x + dx, y, z + dz)) return;
       world.setBlock(x, y, z, B.BED + f * 2); world.setBlock(x + dx, y, z + dz, B.BED + f * 2 + 1);
-      dirtySave = true; return;
+      placed(B.BED, x, y, z); dirtySave = true; return;
     }
-    if (d.places === 'fluid') { world.setBlock(x, y, z, d.fluidBlock); dirtySave = true; return; }
+    if (d.places === 'fluid') { world.setBlock(x, y, z, d.fluidBlock); VC.Audio.play('splash', 0.5); held.swing(); dirtySave = true; return; }
+    if (d.render === 'item') return; // other items (weapons, food) never become blocks
     if (id === B.TORCH) {
       const support = onPlant ? world.getBlock(x, y - 1, z) : target.id;
       if (!VC.Blocks.SOLID[support] || VC.Blocks.RENDER[support] === 5) return;
@@ -594,7 +712,9 @@
     if (VC.Blocks.SOLID[id] && player.intersectsBlock(x, y, z)) return;
     if (VC.Blocks.RENDER[id] === 4) { const below = world.getBlock(x, y - 1, z); if (below !== B.GRASS && below !== B.DIRT && below !== B.SNOW) return; }
     world.setBlock(x, y, z, id);
+    placed(id, x, y, z);
   }
+  function placed(id, x, y, z) { held.swing(); VC.Audio.blockSound('place', id, { x: x + 0.5, y: y + 0.5, z: z + 0.5 }); }
   function pickBlock() {
     if (!target) return;
     const d = defs[target.id], id = d.item || target.id;
@@ -662,6 +782,7 @@
     const c = world.getChunk(Math.floor(bx / CS), Math.floor(bz / CS));
     if (c) { while (sy < CH - 2 && (VC.Blocks.SOLID[world.getBlock(bx, sy, bz)] || VC.Blocks.SOLID[world.getBlock(bx, sy + 1, bz)])) sy++; }
     if (player.mount) { player.dismount(true); updateRideUi(); }
+    if (charge.on) useEnd(true);
     player.respawn(x, sy + 0.01, z); player.burnT = 0; player.lastCause = null;
     for (const m of [...mobs.list]) if (m.hostile && Math.hypot(m.pos.x - x, m.pos.z - z) < 24) mobs.remove(m);
     updateHearts(true);
@@ -685,6 +806,7 @@
       `Chunks: ${meshed} rendered / ${world.chunks.size} loaded  (RD ${settings.renderDistance})\n` +
       `Time: ${timeString()}   Mode: ${player.mount ? 'riding' : player.flying ? 'flying' : player.inWater ? 'swimming' : 'walking'}   Fish: ${mobs.fishes()}/${mobs.maxFish}\n` +
       `Target: ${targetMob ? (targetMob.tamed ? 'Tamed ' : '') + targetMob.type : tgt}   Animals: ${mobs.animals()}/${mobs.max}  Hostile: ${mobs.hostiles()}/${mobs.maxHostile}  TNT: ${tnt.count}  Fluid queue: ${fluids.pending}\n` +
+      `Held: ${heldDef().name}  Arrows: ${proj.flying} flying / ${proj.stuck} stuck  Sound: ${VC.Audio.ctx ? VC.Audio.ctx.state : 'off'}${settings.sound ? '' : ' (muted)'} · ${VC.Audio.played} played${VC.Audio.music.playing ? ' · music' : ''}  ${amb.cave ? 'cave' : amb.outdoors ? 'outdoors' : 'indoors'}\n` +
       `Draw calls: ${renderer.info.render.calls}  Tris: ${(renderer.info.render.triangles / 1000).toFixed(0)}k`;
   }
 
@@ -705,7 +827,7 @@
     targetMob = null;
     if (playing && mobs.list.length && !player.dead) {
       const dir = new THREE.Vector3(0, 0, -1).applyEuler(camera.rotation);
-      const mh = mobs.raycast(camera.position, dir, 5);
+      const mh = mobs.raycast(camera.position, dir, Math.max(5, weaponOf(heldDef()).reach));
       // plants/torches occupy a whole cell for ray picking; let animals standing in them win
       if (mh && (!target || mh.t < target.t || VC.Blocks.RENDER[target.id] >= 4)) { targetMob = mh.mob; target = null; }
     }
@@ -714,6 +836,9 @@
       tnt.daylight = currentDaylight; tnt.listener = player.pos;
       tnt.update(dt);
       fluids.update(dt);
+      proj.daylight = currentDaylight; proj.update(dt, player);
+      if (charge.on) { charge.t += dt; held.charge = Math.min(1, charge.t / charge.w.drawTime); if (heldRanged() !== charge.w || player.dead) useEnd(true); }
+      player.slow = charge.on ? 0.4 : 1;
       // lava burns; water puts the fire out
       if (!player.dead) {
         if (player.inLava) { player.burnT = 4; lavaT -= dt; if (lavaT <= 0) { lavaT = 0.5; player.invuln = 0; player.lastCause = 'lava'; if (player.hurt(3, null, null)) onHurt(); } }
@@ -737,7 +862,7 @@
     }
     lightUniforms.uTime.value = now / 1000;
     if (target) { selBox.visible = true; selBox.position.set(target.x + 0.5, target.y + 0.5, target.z + 0.5); } else selBox.visible = false;
-    if (playing && (mouse.left || mouse.right)) { mouse.timer -= dt; if (mouse.timer <= 0) { mouse.timer = 0.22; if (mouse.left) breakBlock(); else placeBlock(); } }
+    if (playing && (mouse.left || (mouse.right && !charge.on))) { mouse.timer -= dt; if (mouse.timer <= 0) { mouse.timer = 0.22; if (mouse.left) breakBlock(); else placeBlock(); } }
     if (state !== 'playing' && tnt && (tnt.count || tnt.particles.length) && state !== 'title') { tnt.update(state === 'dead' ? dt : 0); }
     if (hurtTimer > 0) { hurtTimer -= dt; if (hurtTimer <= 0) $('hurt-overlay').classList.remove('on'); }
     if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) $('toast').style.opacity = 0; }
@@ -745,12 +870,74 @@
     hudTimer -= dt; if (hudTimer <= 0 && state !== 'title') { hudTimer = 0.25; updateHud(); }
     // loading indicator on title
     if (state === 'title') { const c = world.getChunk(Math.floor(player.pos.x / CS), Math.floor(player.pos.z / CS)); $('loading').textContent = c && c.meshes ? 'World ready' : 'Generating terrain…'; }
+    updateHeld(dt);
+    audioTick(dt);
     const tB = performance.now();
     renderer.render(scene, camera);
+    if (state !== 'title' && state !== 'dead' && !player.dead) held.render(renderer);
     const tC = performance.now();
     perf.update = perf.update * 0.95 + (tB - tA) * 0.05; perf.render = perf.render * 0.95 + (tC - tB) * 0.05;
   }
   const perf = { update: 0, render: 0 };
+  if (state !== 'playing' && charge.on) charge.on = false;
+
+  // ---------- held item, charge bar ----------
+  let heldBright = 1, heldLightT = 0, rangedUi = null;
+  function updateHeld(dt) {
+    if (!player) return;
+    if (state !== 'playing' && charge.on) useEnd(true);
+    held.set(hotbar[selected]);
+    held.hidden = player.dead || (weaponOf(heldDef()).ranged === 'trident' && proj.tridentOut());
+    heldLightT -= dt;
+    if (heldLightT <= 0) {
+      heldLightT = 0.25;
+      const x = Math.floor(player.pos.x), y = Math.floor(player.pos.y + player.eye), z = Math.floor(player.pos.z);
+      const L = world.getBlockLight(x, y, z), sky = mobs.skyOpen(x, y, z) ? 1 : 0.4;
+      heldBright = Math.max(0.16, sky * currentDaylight, L ? Math.pow(L / 15, 1.4) : 0);
+    }
+    const hs = Math.hypot(player.vel.x, player.vel.z);
+    held.update(dt, { bob: player.bob, moving: hs > 0.6 && player.onGround, bright: heldBright, mobile: touchOn() });
+    const cb = $('charge'); cb.style.display = charge.on ? 'block' : 'none'; if (charge.on) cb.firstChild.style.width = Math.round(held.charge * 100) + '%';
+    cb.classList.toggle('full', charge.on && held.charge >= 1);
+    const r = !!heldRanged(); if (r !== rangedUi) { rangedUi = r; document.body.classList.toggle('ranged', r); }
+  }
+
+  // ---------- sound: footsteps, landing, swimming, ambience ----------
+  let stepDist = 0, wasGround = true, wasWater = false, minVy = 0, swimT = 0, envT = 0;
+  const amb = { cave: false, outdoors: true };
+  function blockUnder() {
+    const x = Math.floor(player.pos.x), z = Math.floor(player.pos.z);
+    let id = world.getBlock(x, Math.floor(player.pos.y - 0.05), z);
+    if (id <= 0 || !BL.SOLID[id]) id = world.getBlock(x, Math.floor(player.pos.y - 0.6), z);
+    return id;
+  }
+  function audioTick(dt) {
+    if (!player || !world) return;
+    VC.Audio.setListener(camera.position.x, camera.position.y, camera.position.z, player.yaw);
+    const live = state === 'playing' && !player.dead && !player.frozen;
+    if (live) {
+      const hs = Math.hypot(player.vel.x, player.vel.z);
+      if (player.onGround && !player.flying && hs > 0.6) {
+        stepDist += hs * dt;
+        const stride = player.mount ? (hs > 7 ? 1.25 : 1.6) : 1.7;
+        if (stepDist > stride) { stepDist = 0; if (player.mount) VC.Audio.play('hoof', hs > 7 ? 0.5 : 0.4, { pitch: 0.9 + Math.random() * 0.2 }); else VC.Audio.step(blockUnder(), 0.42); }
+      }
+      if (!player.onGround && !player.inWater && !player.flying) minVy = Math.min(minVy, player.vel.y);
+      if (player.onGround && !wasGround && minVy < -9) { VC.Audio.play('land', Math.min(0.9, -minVy / 22)); VC.Audio.step(blockUnder(), 0.5); }
+      if (player.onGround || player.inWater || player.flying) minVy = 0;
+      if (player.inWater && !wasWater && player.vel.y < -2) VC.Audio.play('splash', Math.min(1, 0.3 - player.vel.y * 0.05));
+      if (player.inWater && !player.onGround && hs > 0.8) { swimT -= dt; if (swimT <= 0) { swimT = 0.75; VC.Audio.play('swim', 0.32, { pitch: 0.9 + Math.random() * 0.2 }); } }
+      wasGround = player.onGround; wasWater = player.inWater;
+      envT -= dt;
+      if (envT <= 0) {
+        envT = 1;
+        const x = Math.floor(player.pos.x), y = Math.floor(player.pos.y + player.eye), z = Math.floor(player.pos.z);
+        const covered = !mobs.skyOpen(x, y, z);
+        amb.outdoors = !covered; amb.cave = covered && player.pos.y < world.gen.height(x, z) - 3;
+      }
+    }
+    VC.Audio.ambient(dt, { active: live, day: currentDaylight, cave: amb.cave, outdoors: amb.outdoors, underwater: player.headInWater });
+  }
 
   // ---------- boot ----------
   const existing = safeParse(localStorage.getItem(SAVE_KEY));
@@ -762,5 +949,5 @@
   requestAnimationFrame(frame);
 
   // Expose for debugging / automated tests
-  window.game = { perf, get isMobile() { return touchOn(); }, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => toggleFlyToast(), mountHorse, dismount, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; }, get tnt() { return tnt; }, get fluids() { return fluids; }, useBed, toggleDoor, scoopFluid, get worldTime() { return worldTime; }, get sleeping() { return sleeping; }, setHostile, respawn, onExplode, get spawnPoint() { return spawnPoint; } };
+  window.game = { perf, get isMobile() { return touchOn(); }, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => toggleFlyToast(), mountHorse, dismount, held, get proj() { return proj; }, useStart, useEnd, quickShot, heldDef, heldRanged, eat, attack, setMuted, get charge() { return charge; }, get amb() { return amb; }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; }, get tnt() { return tnt; }, get fluids() { return fluids; }, useBed, toggleDoor, scoopFluid, get worldTime() { return worldTime; }, get sleeping() { return sleeping; }, setHostile, respawn, onExplode, get spawnPoint() { return spawnPoint; } };
 })();
