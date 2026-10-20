@@ -271,5 +271,7 @@ window.VC = window.VC || {};
   function bedInfo(id) { const d = defs[id]; return d && d.bed; }
   function facingFromYaw(yaw) { const fx = -Math.sin(yaw), fz = -Math.cos(yaw); return Math.abs(fx) > Math.abs(fz) ? (fx > 0 ? 1 : 3) : (fz > 0 ? 0 : 2); }
   const isFluid = (id) => id > 0 && FLUID[id] > 0;
+  // the Horse Spawn Egg goes first in the block menu so it is easy to find
+  ORDER.splice(ORDER.indexOf(B.HORSE_EGG), 1); ORDER.unshift(B.HORSE_EGG);
   VC.Blocks = { defs, SOLID, OPAQUE, RENDER, TEX, LIGHT, FLUID, LEVEL, ORDER, DIRS, shape, aabbHit, doorInfo, doorId, bedInfo, facingFromYaw, isFluid };
 })();

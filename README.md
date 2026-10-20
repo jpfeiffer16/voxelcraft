@@ -9,6 +9,12 @@ Middle click pick block · 1-9 / wheel hotbar · E block inventory · F3 debug H
 Hold right click with a bow or trident to draw, release to shoot.
 
 World edits, player position, time of day and hotbar auto-save to localStorage.
+
+**Day & night**: one full cycle takes **12 minutes**. Day lasts **8.5 min** (06:46–17:14 on the clock), dusk **30 s**,
+night **2.5 min** (18:46–05:14) and dawn **30 s**. The clock runs faster at night, so nights are short. The sky turns
+orange at dawn and dusk. Night spawns (more hostiles, wolf packs, hordes) happen in the dark part of the cycle. You can
+sleep in a bed from late dusk until sunrise, and you wake at the start of the day. The F3 HUD shows the clock, the
+phase and the real time left in it.
 Three.js r160 (MIT) is vendored in `vendor/`.
 
 ## Mobile / touch
@@ -110,7 +116,9 @@ Mobile defaults: render distance 4, pixel ratio 1.
 
 - **Horses** live in herds of 1–3 on open grassland (plains without trees). They come in 7 coats: chestnut, bay, black,
   white, dapple gray, palomino and paint. Each one has a mane, a tail and a walking / galloping gait, and it grazes now and
-  then. The **Horse Spawn Egg** (last hotbar slot in new worlds) puts one down wherever you like.
+  then. The **Horse Spawn Egg** is the first item in the block menu (**E** / **⋯**) and the last hotbar slot in new
+  worlds; place it on the ground to spawn a horse. Older saved worlds get it once, in a duplicate hotbar slot if there
+  is one; otherwise a message points to the block menu.
   - **Right-click / tap a horse** to tame it (a saddle appears) and climb on. **Shift + right-click** tames it without
     getting on.
   - While riding, the camera is at rider height and you can see the rider's legs. **WASD** or the **joystick** steers.
@@ -181,6 +189,19 @@ Mobile defaults: render distance 4, pixel ratio 1.
   - **Music**: gentle generative background music plays now and then.
   - **Controls**: the pause menu has **Master, Music, Effects and Mobs** volume sliders (saved) and a mute button (also
     **M**, or 🔊 on touch). Browsers only allow sound after a first tap or click, so sound starts on your first touch.
+
+## Spawn eggs & big crowds
+
+- **Spawn eggs are never capped.** Every egg (dogs, cats, lions, horses, all predators, zombies and the four fish) spawns
+  as many mobs as you like. Breeding and mobs loaded from a save aren't capped either. The limits (16 animals / 16
+  hostiles / 16 fish, lower on mobile) apply only to natural spawning in the wild. Past 150 mobs on touch devices (300 on
+  desktop) a short toast warns that the game may slow down, but spawning keeps working.
+- To keep big crowds smooth, mobs use **distance LOD**. Mobs close to you update every frame. Mid-distance and far mobs
+  think, move and animate every 2nd / 4th frame, catching up on the time they skipped. Very far ones, and anything past
+  the fog, are frozen and hidden. The full-rate bubble shrinks as the crowd grows (32 → 22 → 16 blocks). Mobs that are
+  fighting, hurt or in love always update at full rate. Each mob's plain boxes are also merged into a few meshes, so a
+  horse is 9 draw calls instead of 34. The F3 HUD shows the LOD split (full / mid / far / frozen).
+- Egg-spawned hostiles still despawn when you go more than 64 blocks away, and they aren't saved (like all monsters).
 
 ### Tilt look troubleshooting
 

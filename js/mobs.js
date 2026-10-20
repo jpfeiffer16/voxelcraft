@@ -111,6 +111,30 @@ window.VC = window.VC || {};
   }
   const shifted = (g, x, y, z) => { const k = 'sh' + g.uuid + [x, y, z]; let r = geoCache.get(k); if (!r) { r = g.clone().translate(x, y, z); geoCache.set(k, r); } return r; };
 
+  // Performance: merge the plain boxes hanging off the same group (body, head, a leg pivot...) into one mesh, so a mob
+  // is a handful of draw calls instead of 15-35. Anything referenced in parts (collar, saddle, rider...) stays separate.
+  function mergeStatic(root, parts) {
+    const keep = new Set();
+    const mark = (v) => { if (!v) return; if (Array.isArray(v)) v.forEach(mark); else if (v.isObject3D) keep.add(v); };
+    for (const k in parts) mark(parts[k]);
+    const own = [], groups = [];
+    root.traverse(o => { if (!o.isMesh) groups.push(o); });
+    for (const g of groups) {
+      const ms = g.children.filter(c => c.isMesh && !keep.has(c) && !c.children.length && c.visible && c.geometry.attributes.color);
+      if (ms.length < 2) continue;
+      let n = 0; for (const m of ms) n += m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count;
+      const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), v = new THREE.Vector3(); let o = 0;
+      for (const m of ms) {
+        m.updateMatrix(); const G = m.geometry, P = G.attributes.position, Cc = G.attributes.color, idx = G.index;
+        const cnt = idx ? idx.count : P.count;
+        for (let i = 0; i < cnt; i++) { const j = idx ? idx.getX(i) : i; v.fromBufferAttribute(P, j).applyMatrix4(m.matrix); pos[o * 3] = v.x; pos[o * 3 + 1] = v.y; pos[o * 3 + 2] = v.z; col[o * 3] = Cc.getX(j); col[o * 3 + 1] = Cc.getY(j); col[o * 3 + 2] = Cc.getZ(j); o++; }
+        g.remove(m);
+      }
+      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.computeBoundingSphere();
+      const mesh = new THREE.Mesh(geo, ms[0].material); g.add(mesh); own.push(geo);
+    }
+    return own;
+  }
   function buildModel(type, coat) {
     const mat = new THREE.MeshBasicMaterial({ vertexColors: true });
     const root = new THREE.Group(), torso = new THREE.Group();
@@ -294,7 +318,8 @@ window.VC = window.VC || {};
     }
     parts.torso = torso;
     if (!parts.collar) parts.collar = new THREE.Object3D();
-    return { root, mat, parts };
+    const own = mergeStatic(root, parts);
+    return { root, mat, parts, own };
   }
 
   // ---------- creature & effect voices (synthesized; routed through VC.Audio's mixer) ----------
@@ -414,7 +439,7 @@ window.VC = window.VC || {};
       this.mobile = !!opts.mobile; this.maxFish = opts.maxFish || (this.mobile ? 6 : 16); this.fishTimer = 2; this.maxWildHorses = this.mobile ? 3 : 5;
       this.spawnTimer = 3; this.hostileTimer = 4; this.sound = true; this.hostile = true; this.burnDaylight = false;
       this.onBreed = null; // (baby, parent) => void
-      this.daylight = 1; this.player = null;
+      this.daylight = 1; this.player = null; this.viewDist = 1e9; // mobs past the fog are hidden
       this.onPlayerDamage = null; // (amount, mob) => void
     }
     get maxZombies() { return this.maxHostile; }
@@ -427,7 +452,8 @@ window.VC = window.VC || {};
     dispose() { for (const m of this.list) this.scene.remove(m.model.root); this.list = []; for (const p of this.particles) this.scene.remove(p.s); this.particles = []; }
     spawn(type, x, y, z, o = {}) {
       const T = TYPES[type]; if (!T) return null;
-      if (T.fish ? this.fishes() >= this.maxFish : T.hostile ? this.hostiles() >= this.maxHostile : this.animals() >= this.max) return null;
+      // caps only limit natural spawning; spawn eggs, breeding and saved mobs pass force: true
+      if (!o.force && (T.fish ? this.fishes() >= this.maxFish : T.hostile ? this.hostiles() >= this.maxHostile : this.animals() >= this.max)) return null;
       const coats = COATS[type];
       const coatIdx = o.coat != null ? o.coat % coats.length : (Math.random() * coats.length) | 0;
       const model = buildModel(type, coats[coatIdx]);
@@ -449,7 +475,7 @@ window.VC = window.VC || {};
       const T = TYPES[m.type], s = m.baby ? 0.5 + 0.5 * Math.min(1, m.age / GROW) : 1;
       m.scale = s; m.hw = T.hw * s; m.h = T.h * s; m.model.root.scale.setScalar(s);
     }
-    remove(m) { if (m.dead) return; m.dead = true; this.scene.remove(m.model.root); m.model.mat.dispose(); const i = this.list.indexOf(m); if (i >= 0) this.list.splice(i, 1); }
+    remove(m) { if (m.dead) return; m.dead = true; this.scene.remove(m.model.root); m.model.mat.dispose(); if (m.model.own) for (const g of m.model.own) g.dispose(); const i = this.list.indexOf(m); if (i >= 0) this.list.splice(i, 1); }
     setHostile(on) { this.hostile = on; if (!on) for (const m of [...this.list]) if (m.hostile) this.remove(m); if (!on) for (const m of this.list) m.angry = 0; }
     // ----- physics helpers -----
     solid(x, y, z) { const id = this.world.getBlock(Math.floor(x), Math.floor(y), Math.floor(z)); return id === -1 || SOLID[id] === 1; }
@@ -592,6 +618,7 @@ window.VC = window.VC || {};
       }
     }
     update(dt, player, daylight) {
+      const baseDt = dt;
       this.daylight = daylight; this.player = player;
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) { this.spawnTimer = 4 + Math.random() * 4; this.spawnNatural(player); }
@@ -599,9 +626,17 @@ window.VC = window.VC || {};
       if (this.hostileTimer <= 0) { this.hostileTimer = daylight < 0.4 ? 1.5 + Math.random() * 2 : 3.5 + Math.random() * 4.5; this.spawnHostile(player); }
       this.fishTimer -= dt;
       if (this.fishTimer <= 0) { this.fishTimer = 2.5 + Math.random() * 3; this.spawnFish(player); }
+      // threats for protectors (built once per frame instead of scanning every mob for every pet)
+      this._threats = []; for (const m of this.list) if (m.hostile || (m.angry > 0 && !m.tamed)) this._threats.push(m);
+      // distance LOD: the more mobs there are, the smaller the full-rate bubble. Mid / far mobs think, move and animate
+      // every 2nd / 4th frame with the time they missed; very far ones are frozen and hidden.
+      const n = this.list.length, big = n > 40, nearR = n > 150 ? 16 : n > 80 ? 22 : 32;
+      const midR = nearR * 2, farR = this.mobile ? (big ? 48 : 72) : (big ? 64 : 96);
+      this.frame = (this.frame + 1) | 0; this.lodStats = { full: 0, mid: 0, far: 0, frozen: 0 };
       for (let i = this.list.length - 1; i >= 0; i--) {
-        const m = this.list[i]; if (!m) continue;
+        dt = baseDt; const m = this.list[i]; if (!m) continue;
         const dx = player.pos.x - m.pos.x, dz = player.pos.z - m.pos.z, dist = Math.hypot(dx, dz);
+        if (m.lodSlot == null) { m.lodSlot = (Math.random() * 4) | 0; m.lodAcc = 0; }
         if (m.rider) { // ridden horse: carried by the player's physics
           if (m.rider.mount !== m || m.rider.dead) { m.rider = null; m.model.parts.rider.visible = false; }
           else { this.ridden(m, dt, m.rider); continue; }
@@ -611,8 +646,18 @@ window.VC = window.VC || {};
           if (m.tamed && !m.sitting && !m.stays && this.loaded(player.pos.x, player.pos.z)) this.teleportNear(m, player);
           m.model.root.visible = false; continue;
         }
+        // LOD tiers (anything fighting, hurt, in love or a foal keeps full rate while it is near enough to matter)
+        const busy = m.hurtT > 0 || m.foeT > 0 || m.angry > 0 || m.love > 0 || (m.hostile && dist < 40);
+        if (!busy && (dist > farR || dist > this.viewDist) && !(m.tamed && !m.sitting && !m.stays && dist < this.viewDist)) { m.model.root.visible = false; m.lodAcc = 0; this.lodStats.frozen++; continue; }
         m.model.root.visible = true;
-        if (m.fish) { this.fishUpdate(m, dt, player); continue; }
+        let mdt = baseDt;
+        if (!busy && dist > nearR) {
+          const k = dist > midR ? 4 : 2; m.lodAcc += dt;
+          if (((this.frame + m.lodSlot) % k) !== 0) continue;
+          mdt = Math.min(0.12, m.lodAcc); m.lodAcc = 0; this.lodStats[k === 4 ? 'far' : 'mid']++;
+        } else { this.lodStats.full++; m.lodAcc = 0; }
+        dt = mdt;
+        if (m.fish) { this.fishUpdate(m, dt, player); dt = baseDt; continue; }
         m.cd -= dt; m.attackAnim = Math.max(0, m.attackAnim - dt); m.hurtT = Math.max(0, m.hurtT - dt); if (m.angry > 0) m.angry -= dt;
         if (m.breedCD > 0) m.breedCD -= dt;
         if (m.baby) { m.age += dt; m.growT -= dt; if (m.growT <= 0) { m.growT = 1; if (m.age >= GROW) this.growUp(m); else this.applyScale(m); } }
@@ -631,7 +676,9 @@ window.VC = window.VC || {};
         if (m.tamed && m.hp < m.hpMax) { m.regenT += dt; if (m.regenT > 4) { m.regenT = 0; m.hp++; } }
         m.soundT -= dt;
         if (m.soundT <= 0) { m.soundT = (m.hostile ? 6 : 15) + Math.random() * 30; if (this.sound && dist < 16 && m.type !== 'lion') playSound(m.type, (1 - dist / 16) * 0.6, m.pos); }
+        dt = baseDt;
       }
+      dt = baseDt;
       this.updateParticles(dt);
     }
     // ---- horses ----
@@ -733,7 +780,7 @@ window.VC = window.VC || {};
       if (la && !la.dead && !la.tamed && player.lastAttackT > 0 && la !== m) return la;
       if (m.foe && !m.foe.dead && m.foeT > 0) return m.foe; // fight back
       let best = null, bd = 12;
-      for (const o of this.list) {
+      for (const o of this._threats || this.list) {
         if (o.dead || !(o.hostile || (o.angry > 0 && !o.tamed))) continue;
         const d = Math.min(o.pos.distanceTo(player.pos), o.pos.distanceTo(m.pos) + 2);
         if (d < bd) { bd = d; best = o; }
@@ -1026,7 +1073,7 @@ window.VC = window.VC || {};
     breed(a, b) {
       a.love = b.love = 0; a.breedCD = b.breedCD = 60;
       const x = (a.pos.x + b.pos.x) / 2, z = (a.pos.z + b.pos.z) / 2, y = Math.max(a.pos.y, b.pos.y) + 0.05;
-      const baby = this.spawn(a.type, x, y, z, { tamed: true, wild: false, baby: true, coat: Math.random() < 0.5 ? a.coat : b.coat, yaw: Math.random() * Math.PI * 2 });
+      const baby = this.spawn(a.type, x, y, z, { force: true, tamed: true, wild: false, baby: true, coat: Math.random() < 0.5 ? a.coat : b.coat, yaw: Math.random() * Math.PI * 2 });
       this.particle(heartTex, new THREE.Vector3(x, y + 1, z), 6, 0.8, 0.9, 1.4);
       if (baby && this.sound) VC.Audio.play('pop', 0.5, { pos: baby.pos });
       if (this.onBreed) this.onBreed(baby, a);
@@ -1034,7 +1081,7 @@ window.VC = window.VC || {};
     }
     growUp(m) { m.baby = false; m.age = GROW; this.applyScale(m); if (m.tamed) m.model.parts.collar.visible = true; if (this.onGrow) this.onGrow(m); }
     serialize() { return this.list.filter(m => !m.hostile && (m.tamed || !m.wild) && !(m.fish && !m.inWater)).map(m => ({ t: m.type, c: m.coat, x: +m.pos.x.toFixed(2), y: +m.pos.y.toFixed(2), z: +m.pos.z.toFixed(2), r: +m.yaw.toFixed(2), tm: m.tamed ? 1 : 0, s: m.sitting ? 1 : 0, hp: m.hp, b: m.baby ? Math.round(m.age) : undefined })); }
-    load(arr) { for (const o of arr || []) if (COATS[o.t] && !TYPES[o.t].hostile) this.spawn(o.t, o.x, o.y, o.z, { coat: o.c, yaw: o.r, tamed: !!o.tm, sitting: !!o.s, wild: false, hp: o.hp, baby: o.b != null, age: o.b || 0 }); }
+    load(arr) { for (const o of arr || []) if (COATS[o.t] && !TYPES[o.t].hostile) this.spawn(o.t, o.x, o.y, o.z, { force: true, coat: o.c, yaw: o.r, tamed: !!o.tm, sitting: !!o.s, wild: false, hp: o.hp, baby: o.b != null, age: o.b || 0 }); }
   }
 
   VC.Mobs = Mobs; VC.MobSounds = VC.Sound = { play: (n, v, o) => VC.Audio.play(n, v, o), unlock: () => VC.Audio.unlock() };

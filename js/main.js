@@ -7,7 +7,18 @@
   const MOBILE = !!VC.isMobile; // mode at load (settings storage key, initial defaults)
   const touchOn = () => !!VC.isMobile; // current touch-controls mode (can change at runtime)
   const SETTINGS_KEY = MOBILE ? 'voxelcraft.settings.mobile.v1' : 'voxelcraft.settings.v1';
-  const DAY_LENGTH = 600; // seconds per full day
+  // Day / night: worldTime is the clock (0 = 06:00 sunrise, 0.25 noon, 0.5 18:00 sunset, 0.75 midnight).
+  // The clock runs at a different speed in each phase so days are long and nights short (real seconds):
+  //   day 510 s (8.5 min) · dusk 30 s · night 150 s (2.5 min) · dawn 30 s  = 720 s (12 min) per full cycle.
+  // Dawn / dusk are the twilight bands where the sun is within ~11.5° of the horizon (|sin(elevation)| < 0.2).
+  const TW = Math.asin(0.2) / (Math.PI * 2); // half-width of a twilight band in clock units (~0.032 = 46 min)
+  const PHASES = [ // [name, clock start, clock end, real seconds]
+    ['dawn', -TW, TW, 30], ['day', TW, 0.5 - TW, 510], ['dusk', 0.5 - TW, 0.5 + TW, 30], ['night', 0.5 + TW, 1 - TW, 150]];
+  const DAY_LENGTH = PHASES.reduce((a, p) => a + p[3], 0); // 720 s
+  function phaseAt(t) { t = ((t % 1) + 1) % 1; if (t >= 1 - TW) t -= 1; for (const p of PHASES) if (t >= p[1] && t < p[2]) return p; return PHASES[1]; }
+  function clockRate(t) { const p = phaseAt(t); return (p[2] - p[1]) / p[3]; } // clock units per real second
+  // real seconds left in the current phase (HUD)
+  function phaseLeft(t) { let u = ((t % 1) + 1) % 1; if (u >= 1 - TW) u -= 1; const p = phaseAt(t); return (p[2] - u) / (p[2] - p[1]) * p[3]; }
 
   window.addEventListener('error', (e) => { const el = $('error'); el.classList.remove('hidden'); el.textContent += (e.message || e) + '\n'; });
 
@@ -83,7 +94,7 @@
   // ---------- game state ----------
   let world = null, player = null;
   let state = 'title'; // title | playing | paused | inventory | dead
-  let worldTime = 0.05;
+  let worldTime = 0.05, eggNote = null;
   let hotbar = [B.IRON_SWORD, B.BOW, B.GRASS, B.PLANKS, B.COBBLE, B.TORCH, B.OAK_DOOR_ITEM, B.STEAK, B.HORSE_EGG];
   let mobs = null, tnt = null, fluids = null, spawnPoint = null, proj = null;
   const held = new VC.Weapons.Held(atlas, tex);
@@ -148,12 +159,20 @@
       if (typeof save.time === 'number') worldTime = save.time;
       if (Array.isArray(save.mobs)) pendingMobs = save.mobs;
       if (Array.isArray(save.hotbar) && save.hotbar.length === 9) hotbar = save.hotbar.map(id => defs[id] && defs[id].placeable ? id : B.STONE);
+      // older worlds: give them the Horse Spawn Egg once, in a free (invalid) or duplicate slot
+      if (Array.isArray(save.hotbar) && !hotbar.includes(B.HORSE_EGG) && !(save.flags && save.flags.horseEgg)) {
+        let slot = save.hotbar.findIndex(id => !(defs[id] && defs[id].placeable));
+        if (slot < 0) slot = hotbar.findIndex((id, i) => hotbar.indexOf(id) !== i);
+        if (slot >= 0) { hotbar[slot] = B.HORSE_EGG; eggNote = 'A Horse Spawn Egg is in hotbar slot ' + (slot + 1) + ' — place it to spawn a horse'; }
+        else eggNote = 'New: Horse Spawn Egg — first item in the block menu (' + (touchOn() ? '⋯' : 'E') + ')';
+      }
     } else {
       const [x, y, z] = findSpawn(world.gen);
       player.pos.set(x, y, z); worldTime = 0.05;
       spawnPoint = [x, y, z];
     }
     if (!spawnPoint) spawnPoint = findSpawn(world.gen);
+    if (eggNote) dirtySave = true;
     updateHearts(true);
     // generate spawn area synchronously
     const pcx = Math.floor(player.pos.x / CS), pcz = Math.floor(player.pos.z / CS);
@@ -168,7 +187,7 @@
     if (!world) return false;
     try {
       const p = player.pos;
-      localStorage.setItem(SAVE_KEY, world.serialize({ time: worldTime, hotbar, mobs: mobs.serialize().concat(pendingMobs || []), spawn: spawnPoint, player: { x: p.x, y: p.y, z: p.z, yaw: player.yaw, pitch: player.pitch, flying: player.flying, hp: player.dead ? player.maxHealth : player.health } }));
+      localStorage.setItem(SAVE_KEY, world.serialize({ time: worldTime, hotbar, flags: { horseEgg: true }, mobs: mobs.serialize().concat(pendingMobs || []), spawn: spawnPoint, player: { x: p.x, y: p.y, z: p.z, yaw: player.yaw, pitch: player.pitch, flying: player.flying, hp: player.dead ? player.maxHealth : player.health } }));
       dirtySave = false; saveTimer = 0;
       return true;
     } catch (e) { console.warn('Save failed', e); return false; }
@@ -235,11 +254,11 @@
   const tmpC = new THREE.Color();
   function smooth(a, b, x) { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
   function updateSky(dt) {
-    worldTime = (worldTime + dt / DAY_LENGTH) % 1;
+    worldTime = (worldTime + dt * clockRate(worldTime)) % 1;
     const ang = worldTime * Math.PI * 2;
     const elev = Math.sin(ang);
     const day = smooth(-0.18, 0.22, elev);
-    const sunset = Math.max(0, 1 - Math.abs(elev) / 0.28) * (Math.cos(ang) > -2 ? 1 : 0);
+    const sunset = Math.max(0, 1 - Math.abs(elev) / 0.24); // orange glow through dawn / dusk
     tmpC.copy(cNight).lerp(cDay, day).lerp(cSunset, sunset * 0.45);
     const R = settings.renderDistance * CS;
     if (player.headInLava) {
@@ -312,6 +331,7 @@
     if (s === 'paused') { saveGame(); $('save-status').textContent = 'World saved automatically.'; }
   }
   function play() {
+    if (eggNote) { const n = eggNote; eggNote = null; setTimeout(() => { toast(n); toastTimer = 6; }, 2600); } // after the start-up tips
     if (noLock()) {
       if (touchOn() && VC.autoMobile && !testMode && !document.fullscreenElement && document.documentElement.requestFullscreen) { try { const p = document.documentElement.requestFullscreen({ navigationUI: 'hide' }); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
       setState('playing'); return;
@@ -490,15 +510,16 @@
     }
     spawnPoint = sp || [x + 0.5, y + 0.6, z + 0.5]; dirtySave = true;
     if (sleeping > 0) return;
-    const night = currentDaylight < 0.45;
-    if (!night) { toast('Spawn point set. You can only sleep at night.'); return; }
+    // sleep from late dusk through the night until sunrise (the night is short now, so dusk counts too)
+    const night = Math.sin(worldTime * Math.PI * 2) < 0.1;
+    if (!night) { toast('Spawn point set. You can only sleep at dusk or night.'); return; }
     if (hostileNear(8)) { toast('Spawn point set. You may not rest now — monsters are nearby!'); return; }
     // sleep: fade out, skip to morning
     $('sleep-overlay').classList.add('on'); sleeping = performance.now() + 1600;
     toast('Sleeping… spawn point set.');
   }
   function finishSleep() {
-    worldTime = Math.floor(worldTime) + 1 + 0.02; // next morning (06:30)
+    worldTime = TW + 0.002; // next morning: start of the day (about 06:49)
     for (const m of [...mobs.list]) if (m.hostile && m.burns && m.pos.distanceTo(player.pos) < 48) mobs.remove(m);
     $('sleep-overlay').classList.remove('on');
     player.health = Math.min(player.maxHealth, player.health + 6); updateHearts(true);
@@ -630,6 +651,14 @@
     }
     return null;
   }
+  // soft warning (never a refusal) when lots of mobs are around: 150+ on touch devices, 300+ on desktop
+  let crowdWarnT = 0;
+  function crowdNote() {
+    const n = mobs.list.length, lim = touchOn() ? 150 : 300;
+    if (n < lim || performance.now() < crowdWarnT) return '';
+    crowdWarnT = performance.now() + 20000;
+    return ' (' + n + ' mobs now — the game may slow down)';
+  }
   function placeFish(d) {
     let c = null;
     if (target) { const x = target.x + target.nx, y = target.y + target.ny, z = target.z + target.nz, id = world.getBlock(x, y, z); if (id > 0 && BL.FLUID[id] === 1) c = [x, y, z]; }
@@ -637,8 +666,8 @@
     if (!c) { toast('Fish need water — aim at a lake or the sea'); return; }
     // drop the fish into the middle of that water column
     let [x, y, z] = c; const below = world.getBlock(x, y - 1, z); if (below > 0 && BL.FLUID[below] === 1) y -= 1;
-    const m = mobs.spawn(d.egg, x + 0.5, y + 0.3, z + 0.5, { yaw: player.yaw + Math.PI, wild: false });
-    if (!m) toast('Too many fish (max ' + mobs.maxFish + ')'); else { toast(mobs.name(m) + ' released'); if (settings.sound) VC.Sound.play('splash', 0.5); dirtySave = true; }
+    const m = mobs.spawn(d.egg, x + 0.5, y + 0.3, z + 0.5, { force: true, yaw: player.yaw + Math.PI, wild: false });
+    if (!m) toast('The fish could not be released here'); else { toast(mobs.name(m) + ' released' + crowdNote()); if (settings.sound) VC.Sound.play('splash', 0.5); dirtySave = true; }
   }
   function placeBlock() {
     unlockAudio();
@@ -680,9 +709,9 @@
     if (d.egg) {
       const hostileEgg = VC.MOB_TYPES[d.egg] && VC.MOB_TYPES[d.egg].hostile;
       if (hostileEgg && !settings.hostile) { toast('Hostile mobs are off (pause menu)'); return; }
-      const m = mobs.spawn(d.egg, x + 0.5, y + 0.01, z + 0.5, { yaw: player.yaw + Math.PI, wild: hostileEgg });
-      if (!m) toast(hostileEgg ? 'Too many monsters (max ' + mobs.maxHostile + ')' : 'Too many animals (max ' + mobs.max + ')');
-      else { toast(mobs.name(m) + ' spawned' + (hostileEgg ? ' — watch out!' : ' — ' + (touchOn() ? 'tap' : 'right-click') + ' it to tame')); dirtySave = true; }
+      const m = mobs.spawn(d.egg, x + 0.5, y + 0.01, z + 0.5, { force: true, yaw: player.yaw + Math.PI, wild: hostileEgg }); // eggs are never capped
+      if (!m) toast('Could not spawn here');
+      else { toast(mobs.name(m) + ' spawned' + (hostileEgg ? ' — watch out!' : ' — ' + (touchOn() ? 'tap' : 'right-click') + ' it to tame') + crowdNote()); dirtySave = true; }
       return;
     }
     const free = (xx, yy, zz) => { const c = world.getBlock(xx, yy, zz); return c >= 0 && isReplaceable(c); };
@@ -792,6 +821,7 @@
 
   // ---------- HUD ----------
   let fpsFrames = 0, fpsTime = 0, fps = 0, hudTimer = 0;
+  function fmtLeft(sec) { sec = Math.max(0, Math.round(sec)); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
   function timeString() { const h = (worldTime * 24 + 6) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); }
   function updateHud() {
     const p = player.pos;
@@ -804,8 +834,8 @@
       `XYZ: ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}\n` +
       `Chunk: ${Math.floor(p.x / CS)}, ${Math.floor(p.z / CS)}   Facing: ${facing}\n` +
       `Chunks: ${meshed} rendered / ${world.chunks.size} loaded  (RD ${settings.renderDistance})\n` +
-      `Time: ${timeString()}   Mode: ${player.mount ? 'riding' : player.flying ? 'flying' : player.inWater ? 'swimming' : 'walking'}   Fish: ${mobs.fishes()}/${mobs.maxFish}\n` +
-      `Target: ${targetMob ? (targetMob.tamed ? 'Tamed ' : '') + targetMob.type : tgt}   Animals: ${mobs.animals()}/${mobs.max}  Hostile: ${mobs.hostiles()}/${mobs.maxHostile}  TNT: ${tnt.count}  Fluid queue: ${fluids.pending}\n` +
+      `Time: ${timeString()} (${phaseAt(worldTime)[0]}, ${fmtLeft(phaseLeft(worldTime))} left)   Mode: ${player.mount ? 'riding' : player.flying ? 'flying' : player.inWater ? 'swimming' : 'walking'}   Fish: ${mobs.fishes()}/${mobs.maxFish}\n` +
+      `Target: ${targetMob ? (targetMob.tamed ? 'Tamed ' : '') + targetMob.type : tgt}   Animals: ${mobs.animals()} (natural cap ${mobs.max})  Hostile: ${mobs.hostiles()}/${mobs.maxHostile}  LOD: ${mobs.lodStats ? mobs.lodStats.full + '/' + mobs.lodStats.mid + '/' + mobs.lodStats.far + '/' + mobs.lodStats.frozen : '-'}  TNT: ${tnt.count}  Fluid queue: ${fluids.pending}\n` +
       `Held: ${heldDef().name}  Arrows: ${proj.flying} flying / ${proj.stuck} stuck  Sound: ${VC.Audio.ctx ? VC.Audio.ctx.state : 'off'}${settings.sound ? '' : ' (muted)'} · ${VC.Audio.played} played${VC.Audio.music.playing ? ' · music' : ''}  ${amb.cave ? 'cave' : amb.outdoors ? 'outdoors' : 'indoors'}\n` +
       `Draw calls: ${renderer.info.render.calls}  Tris: ${(renderer.info.render.triangles / 1000).toFixed(0)}k`;
   }
@@ -814,14 +844,14 @@
   let last = performance.now();
   function frame(now) {
     requestAnimationFrame(frame);
-    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    const rawDt = Math.min(0.25, (now - last) / 1000), dt = Math.min(0.05, rawDt); last = now; // physics steps are capped; the day clock uses real time
     fpsFrames++; fpsTime += dt; if (fpsTime >= 0.5) { fps = Math.round(fpsFrames / fpsTime); fpsFrames = 0; fpsTime = 0; }
     if (!world) return;
     const tA = performance.now();
     const playing = state === 'playing';
     if (playing) player.update(dt); else { if (state === 'title') { player.yaw += dt * 0.04; } player.updateCamera(); }
     updateChunks(playing ? 5 : 14);
-    updateSky(playing ? dt : dt * 0.25);
+    updateSky(playing ? rawDt : rawDt * 0.25);
     // target + outline
     target = playing ? player.raycast(6) : null;
     targetMob = null;
@@ -833,6 +863,7 @@
     }
     if (playing) {
       mobs.update(dt, player, currentDaylight);
+      mobs.viewDist = settings.renderDistance * CS + 8;
       tnt.daylight = currentDaylight; tnt.listener = player.pos;
       tnt.update(dt);
       fluids.update(dt);
@@ -949,5 +980,5 @@
   requestAnimationFrame(frame);
 
   // Expose for debugging / automated tests
-  window.game = { perf, get isMobile() { return touchOn(); }, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => toggleFlyToast(), mountHorse, dismount, held, get proj() { return proj; }, useStart, useEnd, quickShot, heldDef, heldRanged, eat, attack, setMuted, get charge() { return charge; }, get amb() { return amb; }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; }, get tnt() { return tnt; }, get fluids() { return fluids; }, useBed, toggleDoor, scoopFluid, get worldTime() { return worldTime; }, get sleeping() { return sleeping; }, setHostile, respawn, onExplode, get spawnPoint() { return spawnPoint; } };
+  window.game = { perf, get isMobile() { return touchOn(); }, get mobs() { return mobs; }, get targetMob() { return targetMob; }, lightUniforms, play, saveSettings, toast, get hotbar() { return hotbar; }, get selected() { return selected; }, toggleFly: () => toggleFlyToast(), mountHorse, dismount, held, get proj() { return proj; }, useStart, useEnd, quickShot, heldDef, heldRanged, eat, attack, setMuted, get charge() { return charge; }, get amb() { return amb; }, openInventory: () => setState('inventory'), get world() { return world; }, get player() { return player; }, get state() { return state; }, settings, saveGame, setTime: (t) => { worldTime = t; }, get phase() { return phaseAt(worldTime)[0]; }, phaseAt, clockRate, DAY_LENGTH, PHASES, get daylight() { return currentDaylight; }, finishSleep: () => finishSleep(), renderer, scene, camera, setState, select, breakBlock, placeBlock, get target() { return target; }, get tnt() { return tnt; }, get fluids() { return fluids; }, useBed, toggleDoor, scoopFluid, get worldTime() { return worldTime; }, get sleeping() { return sleeping; }, setHostile, respawn, onExplode, get spawnPoint() { return spawnPoint; } };
 })();
