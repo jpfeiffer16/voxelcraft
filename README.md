@@ -116,7 +116,7 @@ Mobile defaults: render distance 4, pixel ratio 1.
 
 - **Horses** live in herds of 1–3 on open grassland (plains without trees). They come in 7 coats: chestnut, bay, black,
   white, dapple gray, palomino and paint. Each one has a mane, a tail and a walking / galloping gait, and it grazes now and
-  then. The **Horse Spawn Egg** is the first item in the block menu (**E** / **⋯**) and the last hotbar slot in new
+  then. The pink **Horse Spawn Egg** is the first item in the block menu (**E** / **⋯**) and the last hotbar slot in new
   worlds; place it on the ground to spawn a horse. Older saved worlds get it once, in a duplicate hotbar slot if there
   is one; otherwise a message points to the block menu.
   - **Right-click / tap a horse** to tame it (a saddle appears) and climb on. **Shift + right-click** tames it without
