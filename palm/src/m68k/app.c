@@ -55,7 +55,9 @@ static UInt32 call(App *s, UInt32 cmd) {
 static void present(App *s) {
   s->a.dst = (UInt32)s->bits; s->a.rowPix = 320;
   call(s, CMD_PRESENT);
-  WinDrawBitmap((BitmapType *)s->bmp3, 0, 0);
+  { UInt16 old = WinSetCoordinateSystem(kCoordinatesNative);
+    WinDrawBitmap((BitmapType *)s->bmp3, 0, 0);
+    WinSetCoordinateSystem(old); }
 }
 
 static void progress(App *s, UInt32 pct, const char *msg) {
@@ -154,8 +156,10 @@ static UInt32 read_keys(App *s) {
   UInt32 st = KeyCurrentState(), k = 0;
   if (st & keyBitPageUp) k |= K_UP;
   if (st & keyBitPageDown) k |= K_DOWN;
-  if (st & keyBitNavLeft) k |= K_LEFT;
-  if (st & keyBitNavRight) k |= K_RIGHT;
+  /* T|E2 reports the 5-way sideways as keyBitNavLeft/Right; PumpkinOS (used for
+     emulator testing) reports them as 0x0400/0x0800, unused on the E2. */
+  if (st & (keyBitNavLeft | 0x0400UL)) k |= K_LEFT;
+  if (st & (keyBitNavRight | 0x0800UL)) k |= K_RIGHT;
   if (st & keyBitNavSelect) k |= K_CENTER;
   if (st & keyBitHard1) k |= K_JUMP;
   if (st & keyBitHard2) k |= K_BREAK;
@@ -210,19 +214,17 @@ static Boolean init(App *s) {
   s->bits = (UInt16 *)BmpGetBits(s->bmp);
   s->bmp3 = BmpCreateBitmapV3(s->bmp, kDensityDouble, s->bits, 0);
   if (!s->bmp3) { FrmAlert(AlertNoMem); return false; }
-  WinSetCoordinateSystem(kCoordinatesNative);
   s->sndVol = (UInt16)PrefGetPreference(prefGameSoundVolume);
   if (s->sndVol > sndMaxAmp) s->sndVol = sndMaxAmp;
   s->sndVol = (UInt16)(s->sndVol * 100 / sndMaxAmp);
   /* hard buttons + 5-way go to the game, not to other apps */
-  KeySetMask(~(keyBitPageUp | keyBitPageDown | keyBitHard1 | keyBitHard2 | keyBitHard3 | keyBitHard4 | keyBitNavLeft | keyBitNavRight | keyBitNavSelect));
+  KeySetMask(~(keyBitPageUp | keyBitPageDown | keyBitHard1 | keyBitHard2 | keyBitHard3 | keyBitHard4 | keyBitNavLeft | keyBitNavRight | keyBitNavSelect | 0x0C00UL));
   return true;
 }
 
 static void cleanup(App *s) {
   UInt16 i;
   KeySetMask(keyBitsAll);
-  WinSetCoordinateSystem(kCoordinatesStandard);
   if (s->bmp3) BmpDelete((BitmapType *)s->bmp3);
   if (s->bmp) BmpDelete(s->bmp);
   if (s->vc) MemChunkFree(s->vc);
@@ -236,7 +238,7 @@ static Boolean form_handler(EventType *e) { (void)e; return false; }
 
 static void run(App *s) {
   EventType e; UInt32 last = TimGetTicks(), tps = SysTicksPerSecond(), saveT = 0;
-  Int16 penX = 0, penY = 0; Boolean penDown = false;
+  Int16 penX = 0, penY = 0, latchX = 0, latchY = 0; Boolean penDown = false, latch = false;
   while (!s->quit) {
     UInt32 now, dt;
     /* drain events without blocking */
@@ -249,13 +251,24 @@ static void run(App *s) {
         if (c == vchrMenu || c == vchrCommand) { s->menuKey = K_MENU; continue; }
         if (c == vchrNavChange || c == vchrPageUp || c == vchrPageDown || (c >= vchrHard1 && c <= vchrHard4)) continue;
       }
-      if (e.eType == penDownEvent || e.eType == penMoveEvent || e.eType == penUpEvent) continue; /* polled below */
+      /* Pen events go to SysHandleEvent first so silkscreen taps (Home, Menu, Find)
+         still become key events; on-screen pen state is polled below. A pen-down is
+         latched so a tap shorter than one frame is not lost. Event coordinates are
+         standard (160x160) because the window stays in kCoordinatesStandard. */
+      if (e.eType == penDownEvent && e.screenY >= 0 && e.screenY < 160 && e.screenX >= 0 && e.screenX < 160) {
+        latch = true; latchX = (Int16)(e.screenX * 2); latchY = (Int16)(e.screenY * 2);
+      }
       if (SysHandleEvent(&e)) continue;
+      if (e.eType == penDownEvent || e.eType == penMoveEvent || e.eType == penUpEvent) continue;
       if (e.eType == frmLoadEvent) { FormType *f = FrmInitForm(e.data.frmLoad.formID); FrmSetActiveForm(f); FrmSetEventHandler(f, form_handler); continue; }
       FrmDispatchEvent(&e);
     } while (EvtEventAvail());
     if (s->quit) break;
-    EvtGetPen(&penX, &penY, &penDown);
+    /* EvtGetPen reports standard coordinates on OS 5; EvtGetPenNative gives the
+       320x320 native pixels of the double-density display window. */
+    EvtGetPenNative(WinGetDisplayWindow(), &penX, &penY, &penDown);
+    if (!penDown && latch) { penX = latchX; penY = latchY; penDown = true; }
+    latch = false;
     now = TimGetTicks(); dt = (now - last) * 1000UL / tps; last = now;
     if (dt > 100) dt = 100; if (dt < 1) dt = 1;
     s->a.keys = read_keys(s); s->menuKey = 0;
