@@ -62,7 +62,12 @@ host: src/host/host.c $(CORE)
 	gcc -O2 -w -o $(B)/host src/host/host.c
 	mkdir -p /tmp/vcshots && $(B)/host res /tmp/vcshots
 
+test: src/host/roundtrip.c src/host/cmp.c $(CORE)
+	mkdir -p $(B)
+	gcc -O2 -w -o $(B)/roundtrip src/host/roundtrip.c && $(B)/roundtrip res 500 && $(B)/roundtrip res 60000
+	gcc -O2 -w -o $(B)/cmp src/host/cmp.c && $(B)/cmp res
+
 clean:
 	rm -rf $(B) VoxelCraft.prc
 
-.PHONY: all check host clean
+.PHONY: all check host test clean

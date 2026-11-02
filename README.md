@@ -17,6 +17,18 @@ sleep in a bed from late dusk until sunrise, and you wake at the start of the da
 phase and the real time left in it.
 Three.js r160 (MIT) is vendored in `vendor/`.
 
+## Palm Tungsten E2 version
+
+There is also a native **Palm OS port** for the Palm Tungsten E2 (Palm OS 5, 320×320 colour), in [`palm/`](palm/).
+
+![VoxelCraft on Palm OS](palm/screenshots/emu_start.png)
+
+- **Download:** [VoxelCraft.prc](https://github.com/jpfeiffer16/voxelcraft/releases/download/palm-v1.0/VoxelCraft.prc).
+- **Install:** HotSync it with Palm Desktop's Quick Install (Windows/Mac) or `pilot-xfer -p usb: -i VoxelCraft.prc` (Linux), or copy it to `/PALM/Launcher/` on an SD card.
+- **Play:** the 5-way walks and turns. Calendar jumps, Contacts breaks, Tasks places and Note Pad opens the inventory. Drag the stylus to look.
+
+See [`palm/README.md`](palm/README.md) for step-by-step HotSync instructions, controls, what was kept or cut, and how it was tested.
+
 ## Mobile / touch
 
 On phones and tablets the game shows touch controls. Choose **Touch controls: Auto / On / Off** on the start screen or in the pause menu,

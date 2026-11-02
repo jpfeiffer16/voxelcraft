@@ -3,12 +3,13 @@
 #define main host_main
 #include "host.c"
 #undef main
-int main(void) {
+int main(int argc, char **argv) {
+  const char *res = argc > 1 ? argv[1] : "../../res";
   static const char *names[M_TYPES] = {"zombie", "dog", "cat", "horse", "lion", "wolf", "spider"};
   const u16 *spr[M_TYPES]; char p[256]; int i, n, bad = 0, worst = 0; long diffpx = 0; VC *g = calloc(1, sizeof(VC)); BTab bt;
   static u16 ref[VW * VH];
-  for (i = 0; i < M_TYPES; i++) { snprintf(p, sizeof p, "../../res/spr_%s.bin", names[i]); spr[i] = slurp(p, 0); }
-  vc_setup(g, slurp("../../res/tiles0.bin", 0), slurp("../../res/tiles1.bin", 0), spr, 777);
+  for (i = 0; i < M_TYPES; i++) { snprintf(p, sizeof p, "%s/spr_%s.bin", res, names[i]); spr[i] = slurp(p, 0); }
+  { char a[512], b[512]; snprintf(a, sizeof a, "%s/tiles0.bin", res); snprintf(b, sizeof b, "%s/tiles1.bin", res); vc_setup(g, slurp(a, 0), slurp(b, 0), spr, 777); }
   while (vc_gen_step(g) < 100) {}
   srand(5);
   for (n = 0; n < 400; n++) {
