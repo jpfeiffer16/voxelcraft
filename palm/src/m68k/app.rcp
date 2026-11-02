@@ -1,0 +1,45 @@
+#include "resource.h"
+
+VERSION ID 1 "1.0"
+APPLICATIONICONNAME ID 1000 "VoxelCraft"
+
+ICONFAMILYEX
+BEGIN
+  BITMAP "../../res/icon_large.bmp" BPP 8 TRANSPARENT 255 255 255
+  BITMAP "../../res/icon_large_hd.bmp" BPP 16 DENSITY 2 TRANSPARENT 255 255 255
+END
+
+SMALLICONFAMILYEX
+BEGIN
+  BITMAP "../../res/icon_small.bmp" BPP 8 TRANSPARENT 255 255 255
+  BITMAP "../../res/icon_small_hd.bmp" BPP 16 DENSITY 2 TRANSPARENT 255 255 255
+END
+
+FORM ID FormMain AT (0 0 160 160)
+NOFRAME
+BEGIN
+END
+
+ALERT ID AlertNeedARM
+ERROR
+BEGIN
+  TITLE "VoxelCraft"
+  MESSAGE "VoxelCraft needs Palm OS 5 on an ARM handheld (Tungsten E2 or similar)."
+  BUTTONS "OK"
+END
+
+ALERT ID AlertNeedHiRes
+ERROR
+BEGIN
+  TITLE "VoxelCraft"
+  MESSAGE "VoxelCraft needs a 320x320 high-density colour screen."
+  BUTTONS "OK"
+END
+
+ALERT ID AlertNoMem
+ERROR
+BEGIN
+  TITLE "VoxelCraft"
+  MESSAGE "Not enough memory to start VoxelCraft. Close other apps or soft-reset and try again (needs about 2.2 MB)."
+  BUTTONS "OK"
+END
