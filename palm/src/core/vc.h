@@ -11,7 +11,7 @@ typedef s32 fx; /* 16.16 fixed point */
 #define FONE 65536
 #define fmul(a, b) ((fx)(((s64)(a) * (b)) >> 16))
 #define VC_STATIC static
-#if defined(__arm__) && !defined(VC_NO_HOT)
+#if defined(__arm__) && !defined(VC_NO_HOT) && ((__GNUC__ > 4) || (__GNUC__ == 4 && __GNUC_MINOR__ >= 4))
 #define HOT __attribute__((optimize("O2")))
 #define AI __attribute__((always_inline))
 #else

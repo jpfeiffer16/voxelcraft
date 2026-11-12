@@ -63,13 +63,13 @@ VC_STATIC void simplex_init(u8 *perm, u32 seed) {
   for (i = 0; i < 512; i++) perm[i] = p[i & 255];
 }
 /* perm values are 0..255: v % 12 by table (no divide in the noise inner loop) */
-static const u8 MOD12[256] = {
+static const u8 MOD12[256] __attribute__((aligned(4))) = {
 #define M12_(i) (i) % 12
 #define M12_8(i) M12_(i), M12_(i + 1), M12_(i + 2), M12_(i + 3), M12_(i + 4), M12_(i + 5), M12_(i + 6), M12_(i + 7)
 #define M12_64(i) M12_8(i), M12_8(i + 8), M12_8(i + 16), M12_8(i + 24), M12_8(i + 32), M12_8(i + 40), M12_8(i + 48), M12_8(i + 56)
   M12_64(0), M12_64(64), M12_64(128), M12_64(192)
 };
-static const s8 GRAD3[12][3] = {{1,1,0},{-1,1,0},{1,-1,0},{-1,-1,0},{1,0,1},{-1,0,1},{1,0,-1},{-1,0,-1},{0,1,1},{0,-1,1},{0,1,-1},{0,-1,-1}};
+static const s8 GRAD3[12][3] __attribute__((aligned(4))) = {{1,1,0},{-1,1,0},{1,-1,0},{-1,-1,0},{1,0,1},{-1,0,1},{1,0,-1},{-1,0,-1},{0,1,1},{0,-1,1},{0,1,-1},{0,-1,-1}};
 #define F2 23988   /* 0.5*(sqrt(3)-1) */
 #define G2 13849   /* (3-sqrt(3))/6 */
 static inline fx gdot2(int g, fx x, fx y) { return GRAD3[g][0] * x + GRAD3[g][1] * y; }
@@ -121,7 +121,7 @@ static HOT fx noise3(const u8 *perm, fx xin, fx yin, fx zin) {
 }
 static HOT fx fbm2(const u8 *perm, fx x, fx y, int oct) {
   fx s = 0; int o, a = FONE;
-  static const s32 INORM[5] = {0, 65536, 43691, 37449, 34953}; /* 1 / sum of amplitudes */
+  static const s32 INORM[5] __attribute__((aligned(4))) = {0, 65536, 43691, 37449, 34953}; /* 1 / sum of amplitudes */
   for (o = 0; o < oct; o++) { s += fmul(a, noise2(perm, x << o, y << o)); a >>= 1; }
   return fmul(s, INORM[oct]);
 }

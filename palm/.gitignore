@@ -2,3 +2,4 @@ build/
 src/host/host
 src/host/cmp
 src/host/roundtrip
+src/host/canary

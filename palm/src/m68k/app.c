@@ -9,8 +9,15 @@
 #define CREATOR 'VxCf'
 #define SAVE_NAME "VoxelCraftSave"
 #define SAVE_TYPE 'DATA'
+#define LOG_NAME "VxLg"
+#define LOG_TYPE 'DATA'
 #define REC_MAX 32000UL
+#ifndef memNewChunkFlagAllowLarge
 #define memNewChunkFlagAllowLarge 0x1000
+#endif
+#ifndef kMinRomVersion
+#define kMinRomVersion sysMakeROMVersion(5, 0, 0, sysROMStageRelease, 0)
+#endif
 /* palmOne 5-way (palmOneNavigator.h) */
 #ifndef keyBitNavLeft
 #define keyBitNavLeft 0x01000000UL
@@ -19,6 +26,9 @@
 #endif
 #ifndef vchrNavChange
 #define vchrNavChange 0x0503
+#endif
+#ifndef pixelFormat565LE
+#define pixelFormat565LE 2
 #endif
 /* core key bits (src/core/vc.h) */
 #define K_UP 1
@@ -37,23 +47,103 @@
 
 typedef struct {
   MemHandle armH, tileH[2], sprH[7];
-  void *arm;
+  void *arm;          /* 4-byte-aligned ARM entry (resource or a copy) */
+  void *armCopy;      /* extra chunk if the resource itself was unaligned */
   void *vc;
-  BitmapType *bmp; BitmapTypeV3 *bmp3; UInt16 *bits;
+  UInt32 vcSize;
+  Boolean vcInStorage; /* allocated with FtrPtrNew: need the write semaphore */
+  BitmapType *bmp; BitmapTypeV3 *bmp3; UInt16 *bits; UInt16 rowBytes;
   ArmArgs a;
   UInt32 menuKey;      /* one-shot K_MENU from the silkscreen Menu button */
   Boolean quit;
   UInt16 sndVol;
 } App;
 
+/* ---- tiny persistent stage log so a Fatal Exception can be reported ---- */
+static void log_stage(const char *msg) {
+  LocalID id; DmOpenRef db; MemHandle h; UInt16 at, n;
+  if (!msg) return;
+  id = DmFindDatabase(0, LOG_NAME);
+  if (!id) {
+    if (DmCreateDatabase(0, LOG_NAME, CREATOR, LOG_TYPE, false) != 0) return;
+    id = DmFindDatabase(0, LOG_NAME);
+    if (!id) return;
+  }
+  db = DmOpenDatabase(0, id, dmModeReadWrite);
+  if (!db) return;
+  while (DmNumRecords(db)) DmRemoveRecord(db, 0);
+  for (n = 0; msg[n]; n++) {}
+  n++;
+  at = dmMaxRecordIndex;
+  h = DmNewRecord(db, &at, n);
+  if (h) {
+    DmWrite(MemHandleLock(h), 0, msg, n);
+    MemHandleUnlock(h);
+    DmReleaseRecord(db, at, true);
+  }
+  DmCloseDatabase(db);
+}
+
+static void log_clear(void) {
+  LocalID id = DmFindDatabase(0, LOG_NAME);
+  if (id) DmDeleteDatabase(0, id);
+}
+
+/* If the previous launch died mid-start, tell the user the last stage reached. */
+static void show_last_stage(void) {
+  LocalID id = DmFindDatabase(0, LOG_NAME);
+  DmOpenRef db; MemHandle h; char buf[48];
+  if (!id) return;
+  db = DmOpenDatabase(0, id, dmModeReadOnly);
+  if (!db) return;
+  h = DmNumRecords(db) ? DmQueryRecord(db, 0) : 0;
+  buf[0] = 0;
+  if (h) {
+    UInt16 n = (UInt16)MemHandleSize(h); char *p = (char *)MemHandleLock(h);
+    if (n > 47) n = 47;
+    if (n) MemMove(buf, p, n);
+    buf[n] = 0; if (n && buf[n - 1] == 0) {}
+    MemHandleUnlock(h);
+  }
+  DmCloseDatabase(db);
+  if (buf[0]) FrmCustomAlert(AlertLastStage, buf, "", "");
+}
+
+static void u32dec(char *out, UInt32 v) {
+  char tmp[12]; int n = 0, i;
+  if (!v) { out[0] = '0'; out[1] = 0; return; }
+  while (v && n < 11) { tmp[n++] = (char)('0' + (v % 10)); v /= 10; }
+  for (i = 0; i < n; i++) out[i] = tmp[n - 1 - i];
+  out[n] = 0;
+}
+
+static void alert_nomem(UInt32 need) {
+  UInt32 freeb = 0, maxc = 0; char a[12], b[12];
+  MemHeapFreeBytes(0, &freeb, &maxc);
+  u32dec(a, (need ? need : freeb) / 1024);
+  u32dec(b, maxc / 1024);
+  FrmCustomAlert(AlertNoMem, a, b, "");
+}
+
+/* ---- ARM call: 68K writes ArmArgs as native big-endian words; the ARM side swaps fields. */
+static void arm_reserve(App *s, Boolean grab) {
+  if (s->vcInStorage) {
+    if (grab) MemSemaphoreReserve(true);
+    else MemSemaphoreRelease(true);
+  }
+}
+
 static UInt32 call(App *s, UInt32 cmd) {
   s->a.cmd = cmd; s->a.vc = (UInt32)s->vc;
+  arm_reserve(s, true);
   PceNativeCall((NativeFuncType *)s->arm, &s->a);
+  arm_reserve(s, false);
   return s->a.ret;
 }
 
 static void present(App *s) {
-  s->a.dst = (UInt32)s->bits; s->a.rowPix = 320;
+  s->a.dst = (UInt32)s->bits;
+  s->a.rowPix = s->rowBytes ? (UInt32)(s->rowBytes / 2) : 320;
   call(s, CMD_PRESENT);
   { UInt16 old = WinSetCoordinateSystem(kCoordinatesNative);
     WinDrawBitmap((BitmapType *)s->bmp3, 0, 0);
@@ -61,6 +151,7 @@ static void present(App *s) {
 }
 
 static void progress(App *s, UInt32 pct, const char *msg) {
+  if (pct > 100) pct = 100;
   s->a.pct = pct; s->a.msg = (UInt32)msg;
   call(s, CMD_PROGRESS);
   present(s);
@@ -85,7 +176,7 @@ static DmOpenRef open_save(Boolean create) {
 static Boolean save_world(App *s) {
   UInt32 len = call(s, CMD_SAVE), off = 0; UInt8 *io = (UInt8 *)call(s, CMD_IOPTR);
   DmOpenRef db = open_save(true); UInt16 i = 0;
-  if (!db || !len) { if (db) DmCloseDatabase(db); return false; }
+  if (!db || !len || !io) { if (db) DmCloseDatabase(db); return false; }
   while (DmNumRecords(db)) DmRemoveRecord(db, 0);
   while (off < len) {
     UInt32 n = len - off; MemHandle h; UInt16 at = dmMaxRecordIndex;
@@ -116,7 +207,7 @@ static UInt32 save_seed(void) {
 
 static Boolean load_world(App *s) {
   DmOpenRef db = open_save(false); UInt8 *io = (UInt8 *)call(s, CMD_IOPTR); UInt32 len = 0; UInt16 i, n;
-  if (!db) return false;
+  if (!db || !io) return false;
   n = DmNumRecords(db);
   for (i = 0; i < n; i++) {
     MemHandle h = DmQueryRecord(db, i); UInt32 sz;
@@ -133,22 +224,41 @@ static Boolean load_world(App *s) {
 static void delete_save(void) { LocalID id = DmFindDatabase(0, SAVE_NAME); if (id) DmDeleteDatabase(0, id); }
 
 /* ---- world setup ---- */
+static const char *gen_label(UInt32 pct) {
+  if (pct < 70) return "Generating terrain...";
+  if (pct < 90) return "Growing trees...";
+  return "Lighting...";
+}
+
 static void start_world(App *s, UInt32 seed, Boolean tryLoad) {
   UInt16 i; UInt32 pct = 0;
   if (!seed) seed = TimGetSeconds() ^ (TimGetTicks() << 12);
+  /* resources stay locked from init(); take the pointer without unlocking them */
   s->a.t0 = (UInt32)MemHandleLock(s->tileH[0]); MemHandleUnlock(s->tileH[0]);
   s->a.t1 = (UInt32)MemHandleLock(s->tileH[1]); MemHandleUnlock(s->tileH[1]);
   for (i = 0; i < 7; i++) { s->a.spr[i] = (UInt32)MemHandleLock(s->sprH[i]); MemHandleUnlock(s->sprH[i]); }
   s->a.seed = seed;
-  s->a.pixBE = ((UInt8 *)s->bmp3)[11] != 3; /* pixelFormat565LE == 3, otherwise big-endian 565 */
+  {
+    UInt32 pf = 0;
+    if (WinScreenGetAttribute(winScreenPixelFormat, &pf) != 0) pf = 0;
+    /* pixelFormat565 (1) is big-endian; pixelFormat565LE (2) and the default E2
+       framebuffer are little-endian. */
+    s->a.pixBE = (pf == 1);
+  }
+  log_stage("ARM setup");
   call(s, CMD_SETUP);
   progress(s, 0, "Generating world...");
-  while (pct < 100) {
+  for (;;) {
+    const char *lab = gen_label(pct);
+    log_stage(lab);
+    progress(s, pct, lab);           /* show the upcoming stage, then do the work */
+    EvtResetAutoOffTimer();
     pct = call(s, CMD_GEN);
-    progress(s, pct, pct < 70 ? "Generating terrain..." : pct < 90 ? "Growing trees..." : "Lighting...");
+    if (pct >= 100) break;
     EvtResetAutoOffTimer();
   }
-  if (tryLoad) { progress(s, 99, "Loading saved world..."); load_world(s); }
+  progress(s, 100, "Done");
+  if (tryLoad) { log_stage("Loading saved world"); progress(s, 99, "Loading saved world..."); load_world(s); }
 }
 
 /* ---- input ---- */
@@ -182,38 +292,85 @@ static void play_sounds(App *s) {
   }
 }
 
+static Boolean alloc_vc(App *s, UInt32 sz) {
+  UInt32 freeb = 0, maxc = 0;
+  s->vcSize = sz;
+  s->vcInStorage = false;
+  MemHeapFreeBytes(0, &freeb, &maxc);
+  /* Prefer a large non-movable dynamic-heap chunk. memNewChunkFlagAllowLarge (0x1000)
+     is required on OS 5 for allocations over 64 KB. */
+  if (maxc >= sz) {
+    s->vc = MemChunkNew(0, sz, (UInt16)(memNewChunkFlagNonMovable | memNewChunkFlagPreLock | memNewChunkFlagAllowLarge));
+    if (s->vc && (((UInt32)s->vc) & 3)) {
+      /* extremely unlikely: refuse rather than let ARM fault on unaligned 32-bit accesses */
+      MemChunkFree(s->vc); s->vc = 0;
+    }
+  }
+  if (!s->vc) {
+    /* Fall back to the storage heap (much larger on the E2). Writes need MemSemaphoreReserve. */
+    if (FtrPtrNew(CREATOR, 1, sz, &s->vc) != 0) s->vc = 0;
+    if (s->vc) s->vcInStorage = true;
+  }
+  if (!s->vc) { alert_nomem(sz); return false; }
+  arm_reserve(s, true);
+  MemSet(s->vc, sz, 0);
+  arm_reserve(s, false);
+  return true;
+}
+
 static Boolean init(App *s) {
-  UInt32 proc = 0, depth = 16, sz; Err err; UInt16 i;
+  UInt32 proc = 0, depth = 16, sz; Err err; UInt16 i, rowBytes = 0;
   MemSet(s, sizeof *s, 0);
+  log_stage("Checking device");
   if (FtrGet(sysFileCSystem, sysFtrNumProcessorID, &proc) || !sysFtrNumProcessorIsARM(proc)) { FrmAlert(AlertNeedARM); return false; }
   {
     UInt32 ver = 0; FtrGet(sysFtrCreator, sysFtrNumROMVersion, &ver);
-    if (ver < sysMakeROMVersion(5, 0, 0, sysROMStageRelease, 0)) { FrmAlert(AlertNeedARM); return false; }
+    if (ver < kMinRomVersion) { FrmAlert(AlertNeedOS); return false; }
   }
   WinScreenMode(winScreenModeSet, 0, 0, &depth, 0);
   {
     UInt32 dens = 0; WinScreenGetAttribute(winScreenDensity, &dens);
     if (dens < kDensityDouble) { FrmAlert(AlertNeedHiRes); return false; }
   }
+  log_stage("Locking resources");
   s->armH = DmGetResource('ARMC', 1);
   s->tileH[0] = DmGetResource('VXtl', 0); s->tileH[1] = DmGetResource('VXtl', 1);
   for (i = 0; i < 7; i++) s->sprH[i] = DmGetResource('VXsp', i);
-  if (!s->armH || !s->tileH[0] || !s->tileH[1]) { FrmAlert(AlertNoMem); return false; }
-  for (i = 0; i < 7; i++) if (!s->sprH[i]) { FrmAlert(AlertNoMem); return false; }
+  if (!s->armH || !s->tileH[0] || !s->tileH[1]) { alert_nomem(0); return false; }
+  for (i = 0; i < 7; i++) if (!s->sprH[i]) { alert_nomem(0); return false; }
   s->arm = MemHandleLock(s->armH);
   MemHandleLock(s->tileH[0]); MemHandleLock(s->tileH[1]);
   for (i = 0; i < 7; i++) MemHandleLock(s->sprH[i]);
-  /* game state lives in one large non-movable dynamic-heap chunk (about 2.1 MB; the E2 heap is 6.3 MB) */
-  s->a.cmd = CMD_SIZE; s->a.vc = 0; PceNativeCall((NativeFuncType *)s->arm, &s->a); sz = s->a.ret;
-  s->vc = MemChunkNew(0, sz, memNewChunkFlagNonMovable | memNewChunkFlagAllowLarge);
-  if (!s->vc) { FrmAlert(AlertNoMem); return false; }
-  MemSet(s->vc, sz, 0);
+  /* XScale fetches ARM instructions only from 4-byte-aligned addresses. If the locked
+     resource isn't aligned, copy it into a non-movable, aligned chunk. */
+  if (!s->arm) { alert_nomem(0); return false; }
+  if (((UInt32)s->arm & 3) != 0) {
+    UInt32 asz = MemHandleSize(s->armH);
+    UInt8 *raw;
+    log_stage("Aligning ARM core");
+    s->armCopy = MemChunkNew(0, asz + 8, (UInt16)(memNewChunkFlagNonMovable | memNewChunkFlagPreLock));
+    if (!s->armCopy) { alert_nomem(asz + 8); return false; }
+    raw = (UInt8 *)((((UInt32)s->armCopy) + 3u) & ~3u);
+    MemMove(raw, s->arm, asz);
+    s->arm = raw;
+  }
+  log_stage("Querying core size");
+  s->a.cmd = CMD_SIZE; s->a.vc = 0;
+  PceNativeCall((NativeFuncType *)s->arm, &s->a);
+  sz = s->a.ret;
+  if (sz < 100000UL || sz > 4000000UL) { FrmAlert(AlertNeedARM); return false; }
+  log_stage("Allocating world");
+  if (!alloc_vc(s, sz)) return false;
+  log_stage("Creating bitmap");
   /* 320x320 16-bit double-density offscreen bitmap; the ARM core writes its pixels directly */
   s->bmp = BmpCreate(320, 320, 16, 0, &err);
-  if (!s->bmp) { FrmAlert(AlertNoMem); return false; }
+  if (!s->bmp) { alert_nomem(320UL * 320UL * 2UL); return false; }
   s->bits = (UInt16 *)BmpGetBits(s->bmp);
+  BmpGetDimensions(s->bmp, 0, 0, &rowBytes);
+  s->rowBytes = rowBytes ? rowBytes : 640;
+  if (!s->bits || ((UInt32)s->bits & 1)) { FrmAlert(AlertNeedHiRes); return false; }
   s->bmp3 = BmpCreateBitmapV3(s->bmp, kDensityDouble, s->bits, 0);
-  if (!s->bmp3) { FrmAlert(AlertNoMem); return false; }
+  if (!s->bmp3) { alert_nomem(64); return false; }
   s->sndVol = (UInt16)PrefGetPreference(prefGameSoundVolume);
   if (s->sndVol > sndMaxAmp) s->sndVol = sndMaxAmp;
   s->sndVol = (UInt16)(s->sndVol * 100 / sndMaxAmp);
@@ -227,9 +384,14 @@ static void cleanup(App *s) {
   KeySetMask(keyBitsAll);
   if (s->bmp3) BmpDelete((BitmapType *)s->bmp3);
   if (s->bmp) BmpDelete(s->bmp);
-  if (s->vc) MemChunkFree(s->vc);
-  if (s->arm) MemHandleUnlock(s->armH);
-  if (s->armH) DmReleaseResource(s->armH);
+  if (s->vc) {
+    if (s->vcInStorage) FtrPtrFree(CREATOR, 1);
+    else MemChunkFree(s->vc);
+    s->vc = 0;
+  }
+  if (s->armCopy) { MemChunkFree(s->armCopy); s->armCopy = 0; }
+  s->arm = 0;
+  if (s->armH) { MemHandleUnlock(s->armH); DmReleaseResource(s->armH); s->armH = 0; }
   for (i = 0; i < 2; i++) if (s->tileH[i]) { MemHandleUnlock(s->tileH[i]); DmReleaseResource(s->tileH[i]); }
   for (i = 0; i < 7; i++) if (s->sprH[i]) { MemHandleUnlock(s->sprH[i]); DmReleaseResource(s->sprH[i]); }
 }
@@ -239,6 +401,7 @@ static Boolean form_handler(EventType *e) { (void)e; return false; }
 static void run(App *s) {
   EventType e; UInt32 last = TimGetTicks(), tps = SysTicksPerSecond(), saveT = 0;
   Int16 penX = 0, penY = 0, latchX = 0, latchY = 0; Boolean penDown = false, latch = false;
+  log_stage("Playing");
   while (!s->quit) {
     UInt32 now, dt;
     /* drain events without blocking */
@@ -284,25 +447,45 @@ static void run(App *s) {
     if (s->a.req & REQ_QUIT) { s->quit = true; }
     if (saveT > 300000UL) { save_world(s); saveT = 0; } /* autosave every 5 minutes */
   }
+  log_stage("Saving");
   save_world(s);
 }
 
 UInt32 PilotMain(UInt16 cmd, MemPtr cmdPBP, UInt16 launchFlags) {
-  (void)cmdPBP; (void)launchFlags;
-  if (cmd == sysAppLaunchCmdNormalLaunch) {
+  UInt32 ver = 0;
+  (void)cmdPBP;
+  /* Other launch codes (HotSync notify, system reset, ...) must not touch globals or UI. */
+  if (cmd != sysAppLaunchCmdNormalLaunch) return 0;
+  FtrGet(sysFtrCreator, sysFtrNumROMVersion, &ver);
+  if (ver && ver < kMinRomVersion) {
+    if (launchFlags & sysAppLaunchFlagNewGlobals) FrmAlert(AlertNeedOS);
+    return sysErrRomIncompatible;
+  }
+  {
+    Boolean chunk = false;
     App *s = (App *)MemPtrNew(sizeof(App));
+    /* ArmArgs inside App must be 4-byte aligned for the ARM core. */
     if (!s) return 0;
+    if (((UInt32)s & 3) != 0) {
+      MemPtrFree(s);
+      s = (App *)MemChunkNew(0, sizeof(App) + 4, (UInt16)(memNewChunkFlagNonMovable | memNewChunkFlagPreLock));
+      chunk = true;
+      if (!s) return 0;
+      if (((UInt32)s & 3) != 0) { MemChunkFree(s); return 0; }
+    }
     if (init(s)) {
       UInt32 seed;
+      show_last_stage();
       FrmGotoForm(FormMain);
       { EventType e; do { EvtGetEvent(&e, 10); if (e.eType == frmLoadEvent) { FormType *f = FrmInitForm(e.data.frmLoad.formID); FrmSetActiveForm(f); FrmSetEventHandler(f, form_handler); } else if (!SysHandleEvent(&e)) FrmDispatchEvent(&e); } while (e.eType != frmOpenEvent && e.eType != nilEvent); }
       seed = save_seed();
       start_world(s, seed, seed != 0);
       run(s);
+      log_clear();
     }
     cleanup(s);
     FrmCloseAllForms();
-    MemPtrFree(s);
+    if (chunk) MemChunkFree(s); else MemPtrFree(s);
   }
   return 0;
 }

@@ -23,7 +23,7 @@ There is also a native **Palm OS port** for the Palm Tungsten E2 (Palm OS 5, 320
 
 ![VoxelCraft on Palm OS](palm/screenshots/emu_start.png)
 
-- **Download:** [VoxelCraft.prc](https://github.com/jpfeiffer16/voxelcraft/releases/download/palm-v1.0/VoxelCraft.prc).
+- **Download:** [VoxelCraft.prc](https://github.com/jpfeiffer16/voxelcraft/releases/download/palm-v1.0.1/VoxelCraft.prc) (v1.0.1). If 1.0 crashed with a Fatal Exception on a real Tungsten E2 while "Growing trees..." was on the loading screen, HotSync this build over it.
 - **Install:** HotSync it with Palm Desktop's Quick Install (Windows/Mac) or `pilot-xfer -p usb: -i VoxelCraft.prc` (Linux), or copy it to `/PALM/Launcher/` on an SD card.
 - **Play:** the 5-way walks and turns. Calendar jumps, Contacts breaks, Tasks places and Note Pad opens the inventory. Drag the stylus to look.
 

@@ -5,9 +5,11 @@ This is a native Palm OS port of VoxelCraft for the **Palm Tungsten E2**:
 - 200 MHz Intel XScale PXA255;
 - 320×320 16-bit colour screen.
 
-The whole thing ships as one HotSync-able file, **`VoxelCraft.prc`** (about 226 KB, creator `VxCf`).
+The whole thing ships as one HotSync-able file, **`VoxelCraft.prc`** (about 228 KB, creator `VxCf`, version 1.0.1).
 
-**Download:** [VoxelCraft.prc](https://github.com/jpfeiffer16/voxelcraft/releases/download/palm-v1.0/VoxelCraft.prc) (release `palm-v1.0`), or use [`palm/VoxelCraft.prc`](VoxelCraft.prc) in this repo.
+**Download:** [VoxelCraft.prc](https://github.com/jpfeiffer16/voxelcraft/releases/download/palm-v1.0.1/VoxelCraft.prc) (release `palm-v1.0.1`), or use [`palm/VoxelCraft.prc`](VoxelCraft.prc) in this repo.
+
+If you installed 1.0 and it died with a Fatal Exception during "Growing trees..." (or just after terrain finished), install **1.0.1** over it with another HotSync. 1.0 ran in the PumpkinOS emulator but crashed on a real Tungsten E2; see "1.0.1 fixes" below.
 
 | Emulator (PumpkinOS, real .prc) | | |
 |---|---|---|
@@ -114,6 +116,26 @@ Sound uses the system **Game Sound** volume (Prefs → Sounds & Alerts).
   - No clouds or particles. TNT does not fall or slide.
 - **Sound:** the Palm OS sound API plays one tone at a time, so the layered web soundscape is reduced to the most important event each frame.
 
+
+## 1.0.1 fixes (real Tungsten E2 crash)
+
+Version 1.0 started on a real E2 and drew the loading screen, then threw a **Fatal Exception** (with a reset notice, and no further error text) when the progress bar said "Growing trees...". PumpkinOS is much more lenient than Garnet 5.4 on an XScale, so 1.0.1 tightens the code against real-device rules.
+
+Most likely causes, in order:
+
+1. **Tree generation and lighting ran as one long ARM call after the "Growing trees..." label was already on screen.** Lighting walked a queue of linear block indices with 32-bit `%` and `/`. On ARM those become libgcc helpers, and a bug or a bad helper can data-abort. The queue now stores packed x/y/z, so it never divides. Trees are generated four rows at a time so Palm OS can paint and reset the auto-off timer. The label now matches the work that is *about to run*: you will see "Lighting..." *before* lighting starts. `tset()` already clipped leaves at the map edge; that clip is kept, and the dirt-under-tree write is bounds-checked too.
+2. **XScale alignment faults.** A 32-bit load or store at a 2-byte address is a data abort on the PXA255. ArmArgs may only be 2-aligned (Palm OS 68K heap), so the ARM entry now reads and writes every field byte-wise in big-endian order. `vc_present` no longer assumes the screen bitmap is 4-aligned. Const tables are 4-aligned. The ARM code is copied to a 4-aligned chunk if the locked resource is not. The game block is rejected if it isn't 4-aligned.
+3. **2.1 MB game block.** `MemChunkNew` uses `memNewChunkFlagAllowLarge` (required on OS 5 above 64 KB). If the dynamic heap can't fit it, the app falls back to the storage heap (`FtrPtrNew`) and takes the write semaphore around each ARM call. A failure shows how much memory is free, instead of crashing.
+4. **Small 68K stack and defensive startup.** The `'pref'` resource now requests a 16 KB stack (it was 4 KB). Startup checks the OS version, ARM, screen, and heap, and writes a short stage name to a `VxLg` database before each step. If the app still dies, the next launch shows an alert: "The last launch stopped during: …".
+
+Other real-device hardening (less likely to have been the 1.0 crash, since 1.0 got as far as the loading screen):
+
+- `PceNativeCall` already byte-swaps the `userData` *pointer* (Palm's own docs). Only the *contents* of ArmArgs are swapped, now with alignment-safe helpers.
+- `BmpGetDimensions` supplies the true row stride; we no longer assume 640 bytes.
+- Pixel endianness comes from `WinScreenGetAttribute(winScreenPixelFormat)`.
+- `PilotMain` ignores launch codes other than a normal launch (so a HotSync notify can't touch globals).
+- The ARM blob is still one position-independent resource, no `.got`/`.data`/`.bss`, under 64 KB.
+
 ## Performance
 
 - **Framerate:** about **7–11 frames per second**, estimated. The frame cost was measured by running the real ARM code in Unicorn and counting instructions, then converting with an XScale CPI of 1.3–2.0:
@@ -138,7 +160,8 @@ Sound uses the system **Game Sound** volume (Prefs → Sounds & Alerts).
     - pen events reach `SysHandleEvent` so the silkscreen buttons work;
     - the 5-way left/right uses `keyBitNavLeft` and `keyBitNavRight`.
 - **Unicorn ARM runs:** `tools/armbench.py` loads the actual `ARMC` resource into the Unicorn ARM emulator, then runs setup, world generation and frames with the same calling convention. It reports instruction counts and writes an image of the frame.
-- **PC test harness:** `src/host/` builds the identical core for the PC.
+- **Stricter Unicorn test:** `tools/armstrict.py` (or `make strict`) maps the PNOlet at a high address with no relocations, keeps ArmArgs 2-byte-aligned and big-endian, uses an 8 KB ARM stack, treats unaligned 16- and 32-bit accesses as faults, and plants canaries around the game block. It steps terrain, trees and lighting separately.
+- **PC test harness:** `src/host/` builds the identical core for the PC. `canary.c` generates eight worlds and checks that tree and light generation never write past the `VC` object.
   - `host.c` runs scripted scenes (mobs, egg, TNT, night, death) and writes screenshots.
   - `roundtrip.c` edits a world, saves it, regenerates it in a fresh state and loads it. Block mismatches came out at 0, including a 160 KB save split across 6 records.
   - `cmp.c` checks that the fast raycaster is pixel-identical to the reference raycaster over 400 random camera poses (0 differences).
@@ -166,7 +189,8 @@ Set `PALMSDK=/path/to/sdk-5r3` (it defaults to the path used on the build machin
 make           # -> VoxelCraft.prc
 make check     # section sizes of the ARM core (the build itself fails on .got/.data/.bss or >= 65000 bytes)
 make host      # PC test harness: scripted scenes -> /tmp/vcshots/*.ppm
-make test      # save/load round trip + fast-vs-reference raycaster comparison
+make test      # save/load round trip, raycaster comparison, tree/light canary
+make strict    # Unicorn PNOlet test with alignment faults, 8 KB stack, no relocations
 ```
 
 ## Layout

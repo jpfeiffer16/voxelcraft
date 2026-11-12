@@ -44,11 +44,15 @@ int vc_gen_step(VC *g) {
   int i;
   if (g->genStage == 0) { /* terrain columns: 4 rows per call */
     for (i = 0; i < 4 && g->genRow < WZ; i++, g->genRow++) { int x; for (x = 0; x < WX; x++) gen_column(g, x, g->genRow); }
-    if (g->genRow >= WZ) { g->genStage = 1; g->genRow = 0; }
+    if (g->genRow >= WZ) { g->genStage = 1; g->genRow = 0; return 70; }
     return g->genRow * 70 / WZ;
   }
-  if (g->genStage == 1) { gen_trees(g); g->genStage = 2; return 75; }
-  if (g->genStage == 2) { light_region(g, WX / 2, WZ / 2, WX); g->genStage = 3; return 95; }
+  if (g->genStage == 1) { /* trees: 4 rows per call so we yield back to Palm OS */
+    for (i = 0; i < 4 && g->genRow < WZ; i++, g->genRow++) gen_trees_row(g, g->genRow);
+    if (g->genRow >= WZ) { g->genStage = 2; g->genRow = 0; return 90; }
+    return 70 + g->genRow * 20 / WZ;
+  }
+  if (g->genStage == 2) { light_region(g, WX / 2, WZ / 2, WX); g->genStage = 3; return 99; }
   if (g->genStage == 3) {
     sky_update(g); find_spawn(g); g->px = g->spawnX; g->py = g->spawnY; g->pz = g->spawnZ;
     { int k; for (k = 0; k < 6; k++) natural_spawn(g); }
@@ -277,15 +281,25 @@ void vc_progress(VC *g, int pct, const char *msg) {
   for (y = 0; y < SH; y++) for (x = 0; x < SW; x++) { const u16 *t = tile(g, T_DIRT); g->back[y * SW + x] = scale565(t[(((y >> 1) & 15) << 4) | ((x >> 1) & 15)], 12); }
   draw_text_c(g, 160, 96, "VoxelCraft", RGB(255, 255, 255), 1);
   draw_text_c(g, 160, 140, msg, RGB(230, 230, 230), 1);
-  fill(g, 60, 170, 200, 10, RGB(30, 30, 30)); fill(g, 60, 170, pct * 2, 10, RGB(110, 200, 90)); frame_rect(g, 59, 169, 202, 12, RGB(200, 200, 200));
+  fill(g, 60, 170, 200, 10, RGB(30, 30, 30)); { int w = (int)pct * 2; if (w < 0) w = 0; if (w > 200) w = 200; fill(g, 60, 170, w, 10, RGB(110, 200, 90)); } frame_rect(g, 59, 169, 202, 12, RGB(200, 200, 200));
   g->hotDirty = 1;
 }
 HOT void vc_present(VC *g, u16 *dst, int rowPix) {
   int y, x;
+  if (!dst || rowPix < SW) return;
+  /* 16-bit copies are safe on a 2-aligned 16-bpp bitmap. A 32-bit copy is only
+     used when both the back buffer and the destination row are 4-byte aligned
+     (XScale faults on unaligned 32-bit accesses). */
   for (y = 0; y < SH; y++) {
-    const u32 *s = (const u32 *)(g->back + y * SW); u32 *d = (u32 *)(dst + y * rowPix);
-    if (g->pixfmtBE) for (x = 0; x < SW / 2; x++) { u32 v = s[x]; d[x] = ((v & 0x00FF00FFu) << 8) | ((v >> 8) & 0x00FF00FFu); }
-    else for (x = 0; x < SW / 2; x++) d[x] = s[x];
+    const u16 *s = g->back + y * SW; u16 *d = dst + y * rowPix;
+    if (g->pixfmtBE) {
+      for (x = 0; x < SW; x++) { u16 v = s[x]; d[x] = (u16)((v << 8) | (v >> 8)); }
+    } else if ((((unsigned long)s | (unsigned long)d) & 3) == 0) {
+      const u32 *s32 = (const u32 *)s; u32 *d32 = (u32 *)d;
+      for (x = 0; x < SW / 2; x++) d32[x] = s32[x];
+    } else {
+      for (x = 0; x < SW; x++) d[x] = s[x];
+    }
   }
 }
 

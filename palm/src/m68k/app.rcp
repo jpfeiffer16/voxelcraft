@@ -1,6 +1,6 @@
 #include "resource.h"
 
-VERSION ID 1 "1.0"
+VERSION ID 1 "1.0.1"
 APPLICATIONICONNAME ID 1000 "VoxelCraft"
 
 ICONFAMILYEX
@@ -24,7 +24,7 @@ ALERT ID AlertNeedARM
 ERROR
 BEGIN
   TITLE "VoxelCraft"
-  MESSAGE "VoxelCraft needs Palm OS 5 on an ARM handheld (Tungsten E2 or similar)."
+  MESSAGE "VoxelCraft needs an ARM handheld (Palm Tungsten E2 or similar) running Palm OS 5."
   BUTTONS "OK"
 END
 
@@ -40,6 +40,22 @@ ALERT ID AlertNoMem
 ERROR
 BEGIN
   TITLE "VoxelCraft"
-  MESSAGE "Not enough memory to start VoxelCraft. Close other apps or soft-reset and try again (needs about 2.2 MB)."
+  MESSAGE "Not enough memory to start VoxelCraft. Need about ^1 KB free (largest free chunk now ^2 KB). Close other apps, do a soft reset, and try again."
+  BUTTONS "OK"
+END
+
+ALERT ID AlertNeedOS
+ERROR
+BEGIN
+  TITLE "VoxelCraft"
+  MESSAGE "VoxelCraft needs Palm OS 5.0 or later (the Tungsten E2 runs 5.4)."
+  BUTTONS "OK"
+END
+
+ALERT ID AlertLastStage
+INFORMATION
+BEGIN
+  TITLE "VoxelCraft"
+  MESSAGE "The last launch stopped during: ^1. This launch will try again. If it fails at the same place, please report that stage."
   BUTTONS "OK"
 END

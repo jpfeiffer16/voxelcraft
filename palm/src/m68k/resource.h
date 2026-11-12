@@ -2,3 +2,5 @@
 #define AlertNeedARM 1100
 #define AlertNeedHiRes 1101
 #define AlertNoMem 1102
+#define AlertNeedOS 1103
+#define AlertLastStage 1104

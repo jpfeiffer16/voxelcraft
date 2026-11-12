@@ -150,13 +150,15 @@ static void tset(VC *g, int x, int y, int z, int id, int force) {
   cur = g->blocks[IDX(x, y, z)];
   if (force || cur == AIR || cur == TALLGRASS || cur == ROSE || cur == DANDELION) g->blocks[IDX(x, y, z)] = (u8)id;
 }
-static void gen_trees(VC *g) {
-  int x, z; u32 seed = g->seed;
-  for (z = 0; z < WZ; z++) for (x = 0; x < WX; x++) {
+/* One world row of trees/cacti. tset() clips x/z/y so canopies at the map edge are safe. */
+static void gen_trees_row(VC *g, int z) {
+  int x; u32 seed = g->seed;
+  if ((unsigned)z >= WZ) return;
+  for (x = 0; x < WX; x++) {
     int i = x + z * WX, h = g->genH[i], wx = x - ORIGIN, wz = z - ORIGIN, height, base, top, y, dx, dz, birch, logb, leaf;
     u32 r = hash3u(wx, 7, wz, seed);
     fx temp = g->genT[i], forest = g->genF[i];
-    if (h <= SEA + 1 || h > 52) continue;
+    if (h <= SEA + 1 || h > 52 || h < 0 || h >= WY) continue;
     if (g->blocks[IDX(x, h, z)] != GRASS && g->blocks[IDX(x, h, z)] != SAND && g->blocks[IDX(x, h, z)] != SNOW) continue;
     if (temp > 35) { /* desert: cactus */
       if (r < P32(0.004) && !is_cave(g, wx, h, wz, h)) { height = 2 + (int)(((u64)hash3u(wx, 9, wz, seed) * 2) >> 32); for (y = 0; y < height; y++) tset(g, x, h + 1 + y, z, CACTUS, 1); }
@@ -180,22 +182,33 @@ static void gen_trees(VC *g) {
       }
     }
     for (y = base; y < top; y++) tset(g, x, y, z, logb, 1);
-    g->blocks[IDX(x, h, z)] = DIRT;
+    if ((unsigned)x < WX && (unsigned)h < WY) g->blocks[IDX(x, h, z)] = DIRT;
   }
+}
+static void gen_trees(VC *g) {
+  int z; for (z = 0; z < WZ; z++) gen_trees_row(g, z);
 }
 
 /* ---------------- lighting ---------------- */
 #define LQN 65536
 static int lightAtten(const VC *g, int id) { return (id == WATER || id == LEAVES || id == BIRCH_LEAVES) ? 2 : 1; }
 static int passLight(const VC *g, int id) { return !(g->bd[id].flags & F_OPAQUE); }
+/* Pack x/z/y in the BFS queue so we never divide (XScale has no integer-div insn;
+ * gcc -Os would otherwise emit a libgcc helper, and a 32-bit % / of the linear index
+ * is also easy to get wrong). x and z fit in 8 bits (0..95), y in 8 bits (0..63). */
+#define LQPACK(x, y, z) ((u32)(x) | ((u32)(z) << 8) | ((u32)(y) << 16))
+#define LQX(p) ((int)((p) & 255u))
+#define LQZ(p) ((int)(((p) >> 8) & 255u))
+#define LQY(p) ((int)(((p) >> 16) & 255u))
 /* BFS over [x0,x1]x[z0,z1] (all y). nib: 0 = block light (low), 4 = sky light (high) */
 static HOT void light_bfs(VC *g, u32 qh, u32 qt, int nib, int x0, int x1, int z0, int z1) {
   u8 *L = g->light; const u8 *B = g->blocks;
   while (qh != qt) {
-    u32 idx = g->lq[qh & (LQN - 1)]; int v, x, y, z, k;
+    u32 p = g->lq[qh & (LQN - 1)]; int v, x, y, z, k;
     qh++;
-    v = (L[idx] >> nib) & 15; if (v <= 1) continue;
-    x = idx % WX; z = (idx / WX) % WZ; y = idx / WXZ;
+    x = LQX(p); z = LQZ(p); y = LQY(p);
+    if ((unsigned)x >= WX || (unsigned)z >= WZ || (unsigned)y >= WY) continue;
+    v = (L[IDX(x, y, z)] >> nib) & 15; if (v <= 1) continue;
     for (k = 0; k < 6; k++) {
       int nx = x, ny = y, nz = z; u32 ni; int id, nv;
       if (k == 0) nx--; else if (k == 1) nx++; else if (k == 2) nz--; else if (k == 3) nz++; else if (k == 4) ny--; else ny++;
@@ -205,7 +218,7 @@ static HOT void light_bfs(VC *g, u32 qh, u32 qt, int nib, int x0, int x1, int z0
       nv = v - lightAtten(g, id);
       if (nv > ((L[ni] >> nib) & 15)) {
         L[ni] = (u8)((L[ni] & ~(15 << nib)) | (nv << nib));
-        if (qt - qh < LQN - 1) { g->lq[qt & (LQN - 1)] = ni; qt++; }
+        if (qt - qh < LQN - 1) { g->lq[qt & (LQN - 1)] = LQPACK(nx, ny, nz); qt++; }
       }
     }
   }
@@ -247,7 +260,7 @@ VC_STATIC void light_region(VC *g, int cx, int cz, int r) {
         if (border) {
           /* a border cell only matters if it touches the box */
         }
-        if (qt < LQN - 1) g->lq[qt++] = i;
+        if (qt < LQN - 1) g->lq[qt++] = LQPACK(x, y, z);
       }
     }
     light_bfs(g, 0, qt, nib, x0, x1, z0, z1);

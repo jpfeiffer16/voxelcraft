@@ -7,8 +7,12 @@
 PALMSDK ?= /workspace/palmtools/sdk/sdk-5r3
 PILRC   ?= pilrc
 M68KCC  ?= m68k-palmos-gcc
-ARMCC   ?= arm-none-eabi-gcc
-OBJCOPY ?= arm-none-eabi-objcopy
+# Prefer a modern arm-none-eabi-gcc (needed for -fno-jump-tables). gcc 3.3's
+# arm-palmos-gcc emits absolute jump tables that crash a raw PNOlet on device.
+ARM_TOOLCHAIN ?= /tmp/armgcc/xpack-arm-none-eabi-gcc-14.2.1-1.1/bin
+ARMCC   ?= $(firstword $(wildcard $(ARM_TOOLCHAIN)/arm-none-eabi-gcc) arm-none-eabi-gcc)
+OBJCOPY ?= $(firstword $(wildcard $(ARM_TOOLCHAIN)/arm-none-eabi-objcopy) arm-none-eabi-objcopy)
+OBJDUMP ?= $(firstword $(wildcard $(ARM_TOOLCHAIN)/arm-none-eabi-objdump) arm-none-eabi-objdump)
 B := build
 
 SDKINC  := $(shell find $(PALMSDK)/include -type d | sed 's/^/-I/')
@@ -29,7 +33,7 @@ $(B)/armc.elf: src/arm/entry.c src/arm/pno.ld $(CORE) | $(B)
 	$(ARMCC) -nostdlib -T src/arm/pno.ld -Wl,--no-undefined -o $@ $(B)/entry.o -lgcc
 
 $(B)/ARMC0001.bin: $(B)/armc.elf
-	@if arm-none-eabi-objdump -h $< | grep -Eq ' \.(got|data|bss|rel)'; then echo "ARM blob has writable data/relocations" >&2; exit 1; fi
+	@if $(OBJDUMP) -h $< | grep -Eq ' \.(got|data|bss|rel)'; then echo "ARM blob has writable data/relocations" >&2; exit 1; fi
 	$(OBJCOPY) -O binary -j .text $< $@
 	@sz=$$(stat -c %s $@); echo "ARM core: $$sz bytes"; test $$sz -lt 65000
 
@@ -53,10 +57,11 @@ $(B)/rsrc.stamp: src/m68k/app.rcp src/m68k/resource.h $(wildcard res/*.bmp) | $(
 VoxelCraft.prc: src/m68k/VoxelCraft.def $(B)/app $(B)/rsrc.stamp $(B)/ARMC0001.bin $(B)/VXtl0000.bin $(B)/VXtl0001.bin $(SPRBINS)
 	build-prc -o $@ src/m68k/VoxelCraft.def $(B)/app $(B)/ARMC0001.bin $(B)/VXtl0000.bin $(B)/VXtl0001.bin $(SPRBINS) \
 	  $(filter-out $(B)/ARMC0001.bin $(B)/VXtl% $(B)/VXsp%,$(wildcard $(B)/*.bin))
+	python3 tools/patch_prc.py $@
 	@ls -l $@
 
 check: $(B)/ARMC0001.bin
-	arm-none-eabi-size -A $(B)/armc.elf
+	$(firstword $(wildcard $(ARM_TOOLCHAIN)/arm-none-eabi-size) arm-none-eabi-size) -A $(B)/armc.elf
 
 host: src/host/host.c $(CORE)
 	gcc -O2 -w -o $(B)/host src/host/host.c
@@ -66,8 +71,12 @@ test: src/host/roundtrip.c src/host/cmp.c $(CORE)
 	mkdir -p $(B)
 	gcc -O2 -w -o $(B)/roundtrip src/host/roundtrip.c && $(B)/roundtrip res 500 && $(B)/roundtrip res 60000
 	gcc -O2 -w -o $(B)/cmp src/host/cmp.c && $(B)/cmp res
+	gcc -O2 -w -o $(B)/canary src/host/canary.c && $(B)/canary res
+
+strict: $(B)/ARMC0001.bin
+	python3 tools/armstrict.py $(B) res
 
 clean:
 	rm -rf $(B) VoxelCraft.prc
 
-.PHONY: all check host test clean
+.PHONY: all check host test strict clean
