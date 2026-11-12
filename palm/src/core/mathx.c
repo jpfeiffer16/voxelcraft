@@ -26,7 +26,11 @@ static inline AI fx rcp(const VC *g, u32 v) {
   int z; u32 r; s64 rr;
   if (v < 4) return RCP_INF;
   z = clz32(v);                         /* v ~ m9 * 2^(23-z), m9 in [256,511] */
-  r = g->rcpT[((v << z) >> 23) - 256];  /* ~ 2^24 / m9 */
+  {
+    u32 idx = ((v << z) >> 23) - 256;
+    if (idx > 256) return RCP_INF;
+    r = g->rcpT[idx];                   /* ~ 2^24 / m9 */
+  }
   rr = z >= 15 ? ((s64)r << (z - 15)) : ((s64)r >> (15 - z)); /* ~ 2^32 / v */
   rr = (rr * (((s64)1 << 33) - (s64)v * rr)) >> 32;            /* one Newton step */
   return rr > RCP_INF ? RCP_INF : (fx)rr;

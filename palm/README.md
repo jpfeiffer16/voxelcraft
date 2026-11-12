@@ -5,11 +5,11 @@ This is a native Palm OS port of VoxelCraft for the **Palm Tungsten E2**:
 - 200 MHz Intel XScale PXA255;
 - 320×320 16-bit colour screen.
 
-The whole thing ships as one HotSync-able file, **`VoxelCraft.prc`** (about 228 KB, creator `VxCf`, version 1.0.1).
+The whole thing ships as one HotSync-able file, **`VoxelCraft.prc`** (about 228 KB, creator `VxCf`, version 1.0.2).
 
-**Download:** [VoxelCraft.prc](https://github.com/jpfeiffer16/voxelcraft/releases/download/palm-v1.0.1/VoxelCraft.prc) (release `palm-v1.0.1`), or use [`palm/VoxelCraft.prc`](VoxelCraft.prc) in this repo.
+**Download:** [VoxelCraft.prc](https://github.com/jpfeiffer16/voxelcraft/releases/download/palm-v1.0.2/VoxelCraft.prc) (release `palm-v1.0.2`), or use [`palm/VoxelCraft.prc`](VoxelCraft.prc) in this repo.
 
-If you installed 1.0 and it died with a Fatal Exception during "Growing trees..." (or just after terrain finished), install **1.0.1** over it with another HotSync. 1.0 ran in the PumpkinOS emulator but crashed on a real Tungsten E2; see "1.0.1 fixes" below.
+If you have 1.0.1 installed and the game now crashes every time you open it (right after the world loads), do **not** just launch it again. Delete the app first so its save databases are removed, then HotSync **1.0.2**. See "Escaping the 1.0.1 crash loop" below. If you only have 1.0 and it died during "Growing trees...", you can HotSync 1.0.2 over it directly.
 
 | Emulator (PumpkinOS, real .prc) | | |
 |---|---|---|
@@ -66,7 +66,7 @@ The app and its save database both have the **backup bit** set, so every HotSync
 | **Contacts** button (2nd) | Break block / attack |
 | **Tasks** button (3rd) | Place block / use item (eat, tame, ride, light TNT, sleep, open doors); also gets off a horse |
 | **Note Pad** button (4th) | Open / close block inventory |
-| **Menu** silkscreen button | Menu: Resume, Save world, Sound on/off, Hostile mobs on/off, New world, Save & Quit |
+| **Menu** silkscreen button | Menu: Resume, Save world, Sound on/off, Hostile mobs on/off, Swap colors, New world, Save & Quit |
 | **Home** silkscreen button | Quit (the world is saved first) |
 | Stylus **drag** on the view | Look around (yaw and pitch) |
 | Stylus **tap** on the view | Place / use at the tapped spot |
@@ -136,6 +136,28 @@ Other real-device hardening (less likely to have been the 1.0 crash, since 1.0 g
 - `PilotMain` ignores launch codes other than a normal launch (so a HotSync notify can't touch globals).
 - The ARM blob is still one position-independent resource, no `.got`/`.data`/`.bss`, under 64 KB.
 
+## 1.0.2 fixes (wrong colors, look/TNT crash, crash loop)
+
+A real Tungsten E2 running 1.0.1 got past world generation (the 1.0 "Growing trees..." crash is fixed), then showed three new problems: the picture was in the wrong colours, looking around or selecting TNT caused a Fatal Exception, and every later launch crashed right after load.
+
+1. **Wrong colors.** 1.0.1 asked `WinScreenGetAttribute(winScreenPixelFormat)` whether the *LCD* was big-endian 565, and used that to decide whether ARM should byte-swap when writing the *offscreen* `BmpCreate` / `BmpCreateBitmapV3` bitmap. On the E2 those two formats need not match: the 68K blitter's 16-bit offscreen bitmap is typically big-endian even when the framebuffer is little-endian. ARM was writing native little-endian pixels into a big-endian bitmap, so red and blue (and the 565 bit layout) looked completely wrong. `BmpGetDimensions` was also called without first switching to native coordinates, so a halved row stride was possible.
+
+   1.0.2 **calibrates empirically at startup**: it draws a known red pixel at (0,0) and a green pixel at (0,1) with `WinSetForeColorRGB` / `WinDrawPixel` into the same offscreen bitmap ARM will use, then reads the raw bytes to learn endianness and the real row stride. `BmpGetDimensions` / `BmpGetDensity` are called in the native coordinate system, and a stride under 640 bytes for a 320-wide 16-bpp buffer is rejected. If the probe fails, the fallback is the 1.0 behaviour (byte-swap, 640-byte rows). There is a **Swap colors** item in the menu if a device still comes out inverted; that choice is remembered in `VoxelCraftPref` (creator `VxCf`).
+
+2. **Crash on look / TNT.** Stylus look, every hotbar and inventory item (including held TNT), and placing / lighting / exploding TNT were audited under the strict Unicorn harness (2-byte-aligned ArmArgs, no relocations, 8 KB ARM stack, unaligned 16/32-bit accesses treated as faults). Defensive fixes: pitch and selection are clamped every frame and after a load; look deltas are limited so a wild stylus jump cannot overflow; sine/cosine already mask the table index, including negative pitch; tile UVs in `draw_iso` / `draw_tile` are masked to 0..15; `draw_heart` and `blit_view` clip and only use 32-bit copies when the back buffer is 4-aligned; the per-frame brightness table (`BTab`, 1 KB) was moved off the ARM stack into the game block (measured stack peak is under 1 KB of 8 KB). Reciprocal lookup is bounds-checked so a bad direction cannot index off `rcpT`.
+
+3. **Crash loop on every launch.** After the first Fatal Exception, relaunching loaded a save taken in that state (TNT selected, a wild camera angle, or a half-written record) and crashed again on the first play frame. 1.0.2 validates every save field (magic, seed, length, player and spawn position, angles, health, hotbar ids, selected slot, mob types/positions/HP, and the edit-list varints, which can no longer run off the end of the buffer). Impossible positions reject the save; extreme pitch is clamped. A 1.0.1 save that would have crashed is loaded safely or discarded. If the previous launch died after "Loading saved world", "Starting play" or "Playing", the next launch offers **Continue** or **New World**. Holding the **Note Pad (Memo)** button while launching always skips the save. The game will not autosave or save-on-quit until 20 play frames have succeeded, so a first-frame crash cannot overwrite or create a broken autosave. A save that fails validation is deleted and a new world is generated, with an alert.
+
+### Escaping the 1.0.1 crash loop
+
+1.0.1 has no recovery prompt, so you have to remove the save from outside the game:
+
+1. On the E2, tap **Home**, then **menu → App → Delete…**, and delete **VoxelCraft**.
+2. Palm OS also deletes every database with the same creator ID. `VoxelCraftSave` and `VxLg` both use creator **`VxCf`**, so they go away with the app. That clears the broken autosave and the stage log that made every launch die after load.
+3. HotSync **1.0.2** (`VoxelCraft.prc` from the `palm-v1.0.2` release).
+
+If you use a file manager instead, delete the databases named `VoxelCraftSave` and `VxLg`, then install 1.0.2 over 1.0.1. Installing 1.0.2 without deleting the save is also safe: it will validate the old save, or offer Continue / New World, or skip the save if you hold Note Pad at launch.
+
 ## Performance
 
 - **Framerate:** about **7–11 frames per second**, estimated. The frame cost was measured by running the real ARM code in Unicorn and counting instructions, then converting with an XScale CPI of 1.3–2.0:
@@ -153,14 +175,15 @@ Other real-device hardening (less likely to have been the 1.0 crash, since 1.0 g
   - Tested by scripted input there: walking and turning with the 5-way, stylus look, breaking with Contacts, placing with Tasks and with stylus taps, hotbar taps, inventory with Note Pad, the menu, the horse egg spawning a horse, and jumping.
   - Saving on exit and loading on relaunch work: the time of day and broken or placed blocks persist.
   - Screenshots are in `screenshots/emu_*.png`.
-- **Not tested on a real device or on real Palm firmware**
-  - PumpkinOS is a re-implementation, not Palm's ROM. No genuine Tungsten E2 ROM was available, and none was downloaded, because they are copyrighted.
+- **Palm firmware ROM**
+  - PumpkinOS is a re-implementation, not Palm's ROM. No genuine Tungsten E2 ROM was used or downloaded (they are copyrighted). The 1.0 / 1.0.1 device reports above came from a physical E2 running its own firmware.
   - Real-device behaviour that differs from PumpkinOS was handled by following the Palm OS 5 SDK documentation:
     - pen coordinates come from `EvtGetPenNative`;
     - pen events reach `SysHandleEvent` so the silkscreen buttons work;
     - the 5-way left/right uses `keyBitNavLeft` and `keyBitNavRight`.
 - **Unicorn ARM runs:** `tools/armbench.py` loads the actual `ARMC` resource into the Unicorn ARM emulator, then runs setup, world generation and frames with the same calling convention. It reports instruction counts and writes an image of the frame.
-- **Stricter Unicorn test:** `tools/armstrict.py` (or `make strict`) maps the PNOlet at a high address with no relocations, keeps ArmArgs 2-byte-aligned and big-endian, uses an 8 KB ARM stack, treats unaligned 16- and 32-bit accesses as faults, and plants canaries around the game block. It steps terrain, trees and lighting separately.
+- **Real Tungsten E2:** 1.0 crashed during "Growing trees...". 1.0.1 finished generation on the same handheld, then showed wrong colours and a Fatal Exception when looking around / selecting TNT, after which every launch crashed on load. 1.0.2 has not yet been re-run on that E2; the fixes above target those exact failures.
+- **Stricter Unicorn test:** `tools/armstrict.py` (or `make strict`) maps the PNOlet at a high address with no relocations, keeps ArmArgs 2-byte-aligned and big-endian, uses an 8 KB ARM stack, treats unaligned 16- and 32-bit accesses as faults, and plants canaries around the game block. It steps terrain, trees and lighting, presents with both pixel endiannesses and a wider stride, then plays through: look in all directions (including wrapped and extreme pitch), every hotbar slot and the full inventory (including held TNT), place / light / explode TNT, save, reload, and load a 1.0.1-style save with wild pitch and TNT selected plus truncated/corrupt saves.
 - **PC test harness:** `src/host/` builds the identical core for the PC. `canary.c` generates eight worlds and checks that tree and light generation never write past the `VC` object.
   - `host.c` runs scripted scenes (mobs, egg, TNT, night, death) and writes screenshots.
   - `roundtrip.c` edits a world, saves it, regenerates it in a fresh state and loads it. Block mismatches came out at 0, including a 160 KB save split across 6 records.
@@ -170,7 +193,7 @@ Other real-device hardening (less likely to have been the 1.0 crash, since 1.0 g
   - Flags: `0x9 RESOURCE BACKUP`
   - Type: `appl`
   - Creator: `VxCf`
-  - Version: 1
+  - Version: 3 (displayed as 1.0.2 in the `tver` resource)
 
   `pilot-file -l` lists the code, data, pref, `tver`, `tAIB` (icons) and `tAIN` resources plus the ARM core and art.
 

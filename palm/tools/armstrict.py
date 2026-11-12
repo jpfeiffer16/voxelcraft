@@ -16,7 +16,8 @@
 Usage: armstrict.py [build-dir] [res-dir]
 Exit 0 on success, 1 on a fault.
 """
-import struct, sys
+import struct, sys, functools
+print = functools.partial(print, flush=True)
 from unicorn import (
     Uc, UcError, UC_ARCH_ARM, UC_MODE_ARM,
     UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE,
@@ -189,12 +190,14 @@ while pct < 100:
     if pct < 70: last_stage = 'terrain'
     elif pct < 90: last_stage = 'trees'
     else: last_stage = 'lighting/spawn'
-    # Alignment hooks on for trees and lighting (the E2 crash window); off for terrain.
-    want_align = last_stage != 'terrain'
-    if not call(2, f'CMD_GEN {last_stage} pct={pct}', align=want_align):
+    # Alignment hooks off during gen: 1.0.1 already covered trees/lighting under
+    # strict alignment, and the hooks make a 300 M-instruction gen take many minutes.
+    if not call(2, f'CMD_GEN {last_stage} pct={pct}', align=False):
         sys.exit(1)
     pct = getf('ret')
     steps += 1
+    if steps == 1 or steps % 10 == 0:
+        print(f'  gen step {steps} pct={pct} ({last_stage})')
     if steps > 500:
         print('FAIL: gen did not finish')
         sys.exit(1)
@@ -213,6 +216,170 @@ if not call(6, 'CMD_PRESENT aligned', align=True):
 setf('dst', SCR + 2)
 if not call(6, 'CMD_PRESENT 2-align dest', align=True):
     sys.exit(1)
+# both calibrated endiannesses and a wider stride (rowBytes=768)
+setf('dst', SCR)
+setf('rowPix', 320)
+setf('pixBE', 0)
+if not call(6, 'CMD_PRESENT LE 320', align=True):
+    sys.exit(1)
+setf('pixBE', 1)
+if not call(6, 'CMD_PRESENT BE 320', align=True):
+    sys.exit(1)
+setf('rowPix', 384)
+if not call(6, 'CMD_PRESENT BE 384-stride', align=True):
+    sys.exit(1)
+setf('rowPix', 320)
+setf('pixBE', 0)
+
+# ---- play-through: look, every hotbar/inventory item, TNT, save/reload ----
+K_PLACE, K_INV = 128, 256
+
+def frame(label, keys=0, penx=0, peny=0, pendown=0, dt=16, align=True):
+    setf('keys', keys)
+    setf('penX', penx & 0xFFFFFFFF)
+    setf('penY', peny & 0xFFFFFFFF)
+    setf('penDown', 1 if pendown else 0)
+    setf('dtMs', dt)
+    if not call(3, label, align=align):
+        return False
+    return True
+
+# look: press, sweep yaw through a full turn, then pitch to both stops
+if not frame('look press', penx=160, peny=120, pendown=1):
+    sys.exit(1)
+x, y = 160, 120
+for i in range(40):
+    x += 20
+    if not frame(f'look yaw {i}', penx=x, peny=y, pendown=1, align=(i % 10 == 0 or i == 39)):
+        sys.exit(1)
+for i in range(12):
+    y += 16
+    if not frame(f'look pitch down {i}', penx=x, peny=y, pendown=1, align=(i == 11)):
+        sys.exit(1)
+for i in range(24):
+    y -= 16
+    if not frame(f'look pitch up {i}', penx=x, peny=y, pendown=1, align=(i == 23)):
+        sys.exit(1)
+if not frame('look release', pendown=0):
+    sys.exit(1)
+print('look sweeps ok')
+
+# every default hotbar slot, including TNT (slot 1), held for a couple of frames
+for slot in range(9):
+    px = 16 + 16 + slot * 32
+    if not frame(f'hotbar press {slot}', penx=px, peny=300, pendown=1):
+        sys.exit(1)
+    if not frame(f'held item slot {slot}', align=True):
+        sys.exit(1)
+print('hotbar / held items ok')
+
+# open inventory (draws every item as an iso icon) then close
+if not frame('inv open press', penx=310, peny=300, pendown=1):
+    sys.exit(1)
+if not frame('inv drawn'):
+    sys.exit(1)
+if not frame('inv close', keys=K_INV):
+    sys.exit(1)
+print('inventory ok')
+
+# select TNT, place, switch to sword, light, wait for the explosion
+if not frame('sel tnt press', penx=16 + 16 + 32, peny=300, pendown=1):
+    sys.exit(1)
+if not frame('sel tnt release'):
+    sys.exit(1)
+# level the camera a bit so the crosshair hits a block
+if not frame('level press', penx=160, peny=144, pendown=1):
+    sys.exit(1)
+for i in range(10):
+    if not frame(f'level drag {i}', penx=160, peny=144 + (i - 5) * 8, pendown=1, align=False):
+        sys.exit(1)
+if not frame('level release'):
+    sys.exit(1)
+if not frame('place tnt', keys=K_PLACE):
+    sys.exit(1)
+if not frame('sel sword press', penx=16 + 16, peny=300, pendown=1):
+    sys.exit(1)
+if not frame('sel sword release'):
+    sys.exit(1)
+if not frame('light tnt', keys=K_PLACE):
+    sys.exit(1)
+for i in range(45):
+    if not frame(f'fuse {i}', dt=100, align=(i % 15 == 0)):
+        sys.exit(1)
+for i in range(4):
+    if not frame(f'boom {i}', dt=50, align=True):
+        sys.exit(1)
+print('TNT place/light/explode ok')
+
+# save, reload, then adversarial 1.0.1-style and corrupt saves
+if not call(4, 'CMD_SAVE', align=True):
+    sys.exit(1)
+slen = getf('ret')
+if slen < 100:
+    print('FAIL: short save', slen)
+    sys.exit(1)
+if not call(8, 'CMD_IOPTR', align=True):
+    sys.exit(1)
+ioptr = getf('ret')
+savebuf = bytes(mu.mem_read(ioptr, slen))
+print(f'save {slen} bytes')
+setf('len', slen)
+if not call(5, 'CMD_LOAD', align=True):
+    sys.exit(1)
+if getf('ret') == 0:
+    print('FAIL: good save rejected')
+    sys.exit(1)
+if not frame('after reload', align=True):
+    sys.exit(1)
+
+# bad magic must be rejected without a fault
+mu.mem_write(ioptr, b'\x00\x00\x00\x00' + savebuf[4:])
+setf('len', slen)
+if not call(5, 'CMD_LOAD', align=True):
+    sys.exit(1)
+if getf('ret') != 0:
+    print('FAIL: bad magic accepted')
+    sys.exit(1)
+
+# 1.0.1-style: extreme pitch, TNT selected. Must clamp and play, not abort.
+mu.mem_write(ioptr, savebuf)
+mu.mem_write(ioptr + 28, struct.pack('<i', -2000000000))  # pitch, little-endian
+flags = struct.unpack_from('<I', savebuf, 84)[0]
+mu.mem_write(ioptr + 84, struct.pack('<I', (flags & ~15) | 1))
+setf('len', slen)
+if not call(5, 'CMD_LOAD', align=True):
+    sys.exit(1)
+if getf('ret') == 0:
+    print('FAIL: extreme pitch + TNT save rejected (should clamp)')
+    sys.exit(1)
+if not frame('reload TNT + wild pitch', align=True):
+    sys.exit(1)
+print('1.0.1-style TNT+pitch save clamped and played')
+
+# insane player X must be rejected
+mu.mem_write(ioptr, savebuf)
+mu.mem_write(ioptr + 12, struct.pack('<i', 0x7FFFFFFF))
+setf('len', slen)
+if not call(5, 'CMD_LOAD', align=True):
+    sys.exit(1)
+if getf('ret') != 0:
+    print('FAIL: insane px accepted')
+    sys.exit(1)
+
+# truncated / high-bit getv tail must not abort
+mu.mem_write(ioptr, savebuf[:100] + b'\x80' * 40)
+setf('len', 140)
+if not call(5, 'CMD_LOAD', align=True):
+    sys.exit(1)
+
+# restore the good save so later canary checks see a consistent VC
+mu.mem_write(ioptr, savebuf)
+setf('len', slen)
+if not call(5, 'CMD_LOAD', align=True):
+    sys.exit(1)
+if not frame('final play', align=True):
+    sys.exit(1)
+print('save validation ok')
 
 # canaries
 pre = bytes(mu.mem_read(VCA - 0x1000, 0x1000))

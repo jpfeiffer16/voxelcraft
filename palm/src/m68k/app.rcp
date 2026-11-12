@@ -1,6 +1,6 @@
 #include "resource.h"
 
-VERSION ID 1 "1.0.1"
+VERSION ID 1 "1.0.2"
 APPLICATIONICONNAME ID 1000 "VoxelCraft"
 
 ICONFAMILYEX
@@ -57,5 +57,29 @@ INFORMATION
 BEGIN
   TITLE "VoxelCraft"
   MESSAGE "The last launch stopped during: ^1. This launch will try again. If it fails at the same place, please report that stage."
+  BUTTONS "OK"
+END
+
+ALERT ID AlertCrashLoad
+INFORMATION
+BEGIN
+  TITLE "VoxelCraft"
+  MESSAGE "The previous session ended unexpectedly after: ^1\n\nContinue with the saved world, or start a New World? To skip the save without this prompt, hold the Note Pad (Memo) button while launching VoxelCraft."
+  BUTTONS "Continue" "New World"
+END
+
+ALERT ID AlertSkipSave
+INFORMATION
+BEGIN
+  TITLE "VoxelCraft"
+  MESSAGE "Note Pad button held: the saved world will not be loaded. A new world will be generated."
+  BUTTONS "OK"
+END
+
+ALERT ID AlertBadSave
+INFORMATION
+BEGIN
+  TITLE "VoxelCraft"
+  MESSAGE "The saved world could not be used (it was damaged or from a crashed session). Starting a new world."
   BUTTONS "OK"
 END

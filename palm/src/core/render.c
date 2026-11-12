@@ -504,6 +504,9 @@ static char *scpy(char *p, const char *s) { while (*s) *p++ = *s++; *p = 0; retu
 /* scaled tile */
 static void draw_tile(VC *g, int x0, int y0, int t, int size, int bright) {
   const u16 *tp = tile(g, t); int x, y;
+  if (size <= 0) return;
+  t &= 127;
+  tp = tile(g, t);
   for (y = 0; y < size; y++) for (x = 0; x < size; x++) {
     u16 c = tp[((y * 16 / size) << 4) | (x * 16 / size)];
     if (c == KEY || (unsigned)(x0 + x) >= SW || (unsigned)(y0 + y) >= (unsigned)g->clipH) continue;
@@ -512,7 +515,10 @@ static void draw_tile(VC *g, int x0, int y0, int t, int size, int bright) {
 }
 /* isometric block icon (like textures.drawIcon) */
 static void draw_iso(VC *g, int x0, int y0, int S, int id) {
-  const BDef *d = &g->bd[id]; const u16 *top, *side; int px, py; fx ik = (fx)((32 << 16) / S); int s = S / 2;
+  const BDef *d; const u16 *top, *side; int px, py; fx ik; int s;
+  id &= 255; d = &g->bd[id];
+  if (S <= 0) return;
+  ik = (fx)((32 << 16) / S); s = S / 2;
   if (d->render == R_CROSS || d->render == R_TORCH || d->render == R_DOOR || (d->flags & F_ITEM)) {
     int t = d->side; if (d->render == R_DOOR) t = T_DOOR_ITEM; if (id >= BED && id < BED + 8) t = T_BED_ITEM;
     draw_tile(g, x0 + S / 10, y0 + S / 10, t, S * 8 / 10, 32); return;
@@ -523,15 +529,15 @@ static void draw_iso(VC *g, int x0, int y0, int S, int id) {
     fx dx = (px - s) << 16, dy = py << 16, u, v; u16 c = KEY; int b = 32;
     /* top face: origin (s,0), u*(k,k/2) + v*(-k,k/2), k = S/32 */
     u = fmul((2 * dy + dx) / 2, ik); v = fmul((2 * dy - dx) / 2, ik);
-    if (u >= 0 && v >= 0 && u < FX(16) && v < FX(16)) c = top[((v >> 16) << 4) | (u >> 16)];
+    if (u >= 0 && v >= 0 && u < FX(16) && v < FX(16)) { int uu = (int)(u >> 16) & 15, vv = (int)(v >> 16) & 15; c = top[(vv << 4) | uu]; }
     else {
       fx lx = px << 16, ly = (py << 16) - (s << 15);
       u = fmul(lx, ik); v = fmul(ly - lx / 2, ik);
-      if (px < s && u >= 0 && v >= 0 && u < FX(16) && v < FX(16)) { c = side[((v >> 16) << 4) | (u >> 16)]; b = 26; }
+      if (px < s && u >= 0 && v >= 0 && u < FX(16) && v < FX(16)) { int uu = (int)(u >> 16) & 15, vv = (int)(v >> 16) & 15; c = side[(vv << 4) | uu]; b = 26; }
       else {
         fx rx = (px - s) << 16, ry = (py - s) << 16;
         u = fmul(rx, ik); v = fmul(ry + rx / 2, ik);
-        if (px >= s && u >= 0 && v >= 0 && u < FX(16) && v < FX(16)) { c = side[((v >> 16) << 4) | (u >> 16)]; b = 21; }
+        if (px >= s && u >= 0 && v >= 0 && u < FX(16) && v < FX(16)) { int uu = (int)(u >> 16) & 15, vv = (int)(v >> 16) & 15; c = side[(vv << 4) | uu]; b = 21; }
       }
     }
     if (c == KEY || (unsigned)(x0 + px) >= SW || (unsigned)(y0 + py) >= (unsigned)g->clipH) continue;
@@ -548,16 +554,25 @@ static void draw_heart(VC *g, int x0, int y0, int kind) { /* 0 empty, 1 half, 2 
     {
       u16 c = edge ? RGB(20, 0, 0) : (kind == 2 || (kind == 1 && x < 5)) ? RGB(220, 30, 30) : RGB(60, 20, 20);
       if (!edge && y == 1 && x >= 2 && x <= 3 && kind) c = RGB(255, 160, 160);
-      g->back[(y0 + y) * SW + x0 + x] = c;
+      if ((unsigned)(x0 + x) < SW && (unsigned)(y0 + y) < SH) g->back[(y0 + y) * SW + x0 + x] = c;
     }
   }
 }
 
 /* blit view (2x) into back */
 static HOT void blit_view(VC *g) {
-  int x, y; u32 *dst = (u32 *)g->back; const u16 *src = g->view;
-  for (y = 0; y < VH; y++) {
-    u32 *r0 = dst + (2 * y) * (SW / 2), *r1 = r0 + SW / 2; const u16 *s = src + y * VW;
-    for (x = 0; x < VW; x++) { u32 p = s[x]; p |= p << 16; r0[x] = p; r1[x] = p; }
+  int x, y; const u16 *src = g->view;
+  /* 32-bit duplicate-and-store is only safe when the 320-wide back buffer is 4-aligned. */
+  if ((((unsigned long)g->back) & 3) == 0) {
+    u32 *dst = (u32 *)g->back;
+    for (y = 0; y < VH; y++) {
+      u32 *r0 = dst + (2 * y) * (SW / 2), *r1 = r0 + SW / 2; const u16 *s = src + y * VW;
+      for (x = 0; x < VW; x++) { u32 p = s[x]; p |= p << 16; r0[x] = p; r1[x] = p; }
+    }
+  } else {
+    for (y = 0; y < VH; y++) {
+      u16 *r0 = g->back + (2 * y) * SW, *r1 = r0 + SW; const u16 *s = src + y * VW;
+      for (x = 0; x < VW; x++) { u16 p = s[x]; r0[2 * x] = r0[2 * x + 1] = p; r1[2 * x] = r1[2 * x + 1] = p; }
+    }
   }
 }

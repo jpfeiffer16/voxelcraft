@@ -11,6 +11,8 @@
 #define SAVE_TYPE 'DATA'
 #define LOG_NAME "VxLg"
 #define LOG_TYPE 'DATA'
+#define PREF_NAME "VoxelCraftPref"
+#define PREF_TYPE 'DATA'
 #define REC_MAX 32000UL
 #ifndef memNewChunkFlagAllowLarge
 #define memNewChunkFlagAllowLarge 0x1000
@@ -44,6 +46,10 @@
 #define REQ_SAVE 1
 #define REQ_QUIT 2
 #define REQ_NEWWORLD 4
+#define REQ_PIXSWAP 8
+#ifndef keyBitHard4
+#define keyBitHard4 0x00000020UL
+#endif
 
 typedef struct {
   MemHandle armH, tileH[2], sprH[7];
@@ -57,6 +63,7 @@ typedef struct {
   UInt32 menuKey;      /* one-shot K_MENU from the silkscreen Menu button */
   Boolean quit;
   UInt16 sndVol;
+  UInt32 calPixBE;     /* empirical offscreen-bitmap endianness (1 = ARM must swap) */
 } App;
 
 /* ---- tiny persistent stage log so a Fatal Exception can be reported ---- */
@@ -107,6 +114,181 @@ static void show_last_stage(void) {
   }
   DmCloseDatabase(db);
   if (buf[0]) FrmCustomAlert(AlertLastStage, buf, "", "");
+}
+
+/* Returns true if buf was filled with the last VxLg stage name. */
+static Boolean read_stage(char *buf, UInt16 max) {
+  LocalID id = DmFindDatabase(0, LOG_NAME);
+  DmOpenRef db; MemHandle h;
+  if (buf && max) buf[0] = 0;
+  if (!id || !buf || max < 2) return false;
+  db = DmOpenDatabase(0, id, dmModeReadOnly);
+  if (!db) return false;
+  h = DmNumRecords(db) ? DmQueryRecord(db, 0) : 0;
+  if (h) {
+    UInt16 n = (UInt16)MemHandleSize(h); char *p = (char *)MemHandleLock(h);
+    if (n >= max) n = (UInt16)(max - 1);
+    if (n) MemMove(buf, p, n);
+    buf[n] = 0;
+    MemHandleUnlock(h);
+  }
+  DmCloseDatabase(db);
+  return buf[0] != 0;
+}
+
+static Boolean stage_is_play(const char *s) {
+  const char *a, *b;
+  if (!s || !s[0]) return false;
+  /* "Loading saved world", "Starting play", "Playing", "First frame" */
+  a = s; b = "Loading saved";
+  while (*b && *a == *b) { a++; b++; }
+  if (*b == 0) return true;
+  a = s; b = "Starting play";
+  while (*b && *a == *b) { a++; b++; }
+  if (*b == 0) return true;
+  a = s; b = "Playing";
+  while (*b && *a == *b) { a++; b++; }
+  if (*b == 0) return true;
+  a = s; b = "First frame";
+  while (*b && *a == *b) { a++; b++; }
+  return *b == 0;
+}
+
+static Boolean hold_memo(void) {
+  return (KeyCurrentState() & keyBitHard4) != 0;
+}
+
+/* 0 = try to load a save if one exists, 1 = start a new world (do not load). */
+static int decide_load(void) {
+  char buf[48];
+  Boolean have = read_stage(buf, 48);
+  if (hold_memo()) {
+    FrmAlert(AlertSkipSave);
+    return 1;
+  }
+  if (have && stage_is_play(buf)) {
+    /* Button 1 = Continue, button 2 = New World (Palm buttons are 1-based). */
+    if (FrmCustomAlert(AlertCrashLoad, buf, "", "") == 2) return 1;
+    return 0;
+  }
+  if (have) FrmCustomAlert(AlertLastStage, buf, "", "");
+  return 0;
+}
+
+static void pref_set(UInt8 pixBE) {
+  LocalID id = DmFindDatabase(0, PREF_NAME);
+  DmOpenRef db; MemHandle h; UInt16 at; UInt8 rec[2];
+  rec[0] = 'C'; rec[1] = pixBE ? 1 : 0;
+  if (!id) {
+    if (DmCreateDatabase(0, PREF_NAME, CREATOR, PREF_TYPE, false) != 0) return;
+    id = DmFindDatabase(0, PREF_NAME);
+    if (!id) return;
+  }
+  db = DmOpenDatabase(0, id, dmModeReadWrite);
+  if (!db) return;
+  {
+    UInt16 attr = 0;
+    DmDatabaseInfo(0, id, 0, &attr, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    if (!(attr & dmHdrAttrBackup)) { attr |= dmHdrAttrBackup; DmSetDatabaseInfo(0, id, 0, &attr, 0, 0, 0, 0, 0, 0, 0, 0, 0); }
+  }
+  while (DmNumRecords(db)) DmRemoveRecord(db, 0);
+  at = dmMaxRecordIndex;
+  h = DmNewRecord(db, &at, 2);
+  if (h) {
+    DmWrite(MemHandleLock(h), 0, rec, 2);
+    MemHandleUnlock(h);
+    DmReleaseRecord(db, at, true);
+  }
+  DmCloseDatabase(db);
+}
+
+/* 0/1 = stored override, 2 = none (use calibration). */
+static int pref_get(void) {
+  LocalID id = DmFindDatabase(0, PREF_NAME);
+  DmOpenRef db; MemHandle h; int v = 2;
+  if (!id) return 2;
+  db = DmOpenDatabase(0, id, dmModeReadOnly);
+  if (!db) return 2;
+  h = DmNumRecords(db) ? DmQueryRecord(db, 0) : 0;
+  if (h && MemHandleSize(h) >= 2) {
+    UInt8 *p = (UInt8 *)MemHandleLock(h);
+    if (p[0] == 'C') v = p[1] ? 1 : 0;
+    MemHandleUnlock(h);
+  }
+  DmCloseDatabase(db);
+  return v;
+}
+
+/* Draw known pixels with the 68K blitter into the same offscreen bitmap ARM will
+   write, then read the raw bytes. This is the only reliable way to learn the
+   endianness and row stride of BmpCreate + BmpCreateBitmapV3 on a given device.
+   Fallback if it fails: swap (pixBE=1), which is what 1.0 effectively did, and
+   640-byte rows (320 pixels). */
+static void calibrate_pixels(App *s) {
+  Err err = 0;
+  WinHandle wh, oldW;
+  UInt16 oldc, rb = 0, rb3 = 0;
+  Coord w = 0, h = 0;
+  RGBColorType red, grn, prev;
+  UInt8 *bits;
+  Int32 row;
+  Boolean be = true; /* 1.0 default: ARM writes byte-swapped (68K-BE) pixels */
+  int ov;
+
+  oldc = WinSetCoordinateSystem(kCoordinatesNative);
+  BmpGetDimensions(s->bmp, &w, &h, &rb);
+  if (s->bmp3) BmpGetDimensions((BitmapType *)s->bmp3, 0, 0, &rb3);
+  WinSetCoordinateSystem(oldc);
+  /* Never trust a halved stride. BmpGetDimensions may return standard-density
+     width/height (160) depending on the current coordinate system; rowBytes is
+     documented as the real byte count, but we still refuse anything under 640
+     for a 320-wide 16-bpp buffer. */
+  if (rb3 >= 640) row = rb3;
+  else if (rb >= 640) row = rb;
+  else row = 640;
+  s->rowBytes = (UInt16)row;
+  s->a.rowPix = (UInt32)(row / 2);
+  if (s->a.rowPix < 320) { s->rowBytes = 640; s->a.rowPix = 320; }
+
+  bits = (UInt8 *)s->bits;
+  if (!bits) { s->calPixBE = 1; s->a.pixBE = 1; return; }
+
+  red.index = 0; red.r = 0xF8; red.g = 0; red.b = 0;
+  grn.index = 0; grn.r = 0; grn.g = 0xFC; grn.b = 0;
+  wh = WinCreateBitmapWindow(s->bmp3 ? (BitmapType *)s->bmp3 : s->bmp, &err);
+  if (wh && err == 0) {
+    Int16 i, found = 0;
+    oldW = WinSetDrawWindow(wh);
+    oldc = WinSetCoordinateSystem(kCoordinatesNative);
+    WinSetForeColorRGB(&red, &prev);
+    WinDrawPixel(0, 0);
+    WinSetForeColorRGB(&grn, &prev);
+    WinDrawPixel(0, 1);
+    WinSetCoordinateSystem(oldc);
+    WinSetDrawWindow(oldW);
+    WinDeleteWindow(wh, false);
+
+    /* RGB565 red is 0xF800, green is 0x07E0. */
+    if (bits[0] == 0xF8 && bits[1] == 0x00) be = true;       /* BE in memory: ARM must swap */
+    else if (bits[0] == 0x00 && bits[1] == 0xF8) be = false; /* LE in memory */
+    else be = true; /* keep the 1.0 default if the probe did not land */
+
+    for (i = 2; i < 2048; i += 2) {
+      UInt16 vbe = (UInt16)(((UInt16)bits[i] << 8) | bits[i + 1]);
+      UInt16 vle = (UInt16)(bits[i] | ((UInt16)bits[i + 1] << 8));
+      if (vbe == 0x07E0 || vle == 0x07E0) { found = i; break; }
+    }
+    if (found >= 640 && found <= 768 && (found % 2) == 0) {
+      s->rowBytes = (UInt16)found;
+      s->a.rowPix = (UInt32)found / 2;
+    }
+    bits[0] = bits[1] = 0;
+    if (s->rowBytes >= 2) { bits[s->rowBytes] = 0; bits[s->rowBytes + 1] = 0; }
+  }
+
+  s->calPixBE = be ? 1 : 0;
+  ov = pref_get();
+  s->a.pixBE = (ov == 2) ? s->calPixBE : (UInt32)ov;
 }
 
 static void u32dec(char *out, UInt32 v) {
@@ -238,13 +420,9 @@ static void start_world(App *s, UInt32 seed, Boolean tryLoad) {
   s->a.t1 = (UInt32)MemHandleLock(s->tileH[1]); MemHandleUnlock(s->tileH[1]);
   for (i = 0; i < 7; i++) { s->a.spr[i] = (UInt32)MemHandleLock(s->sprH[i]); MemHandleUnlock(s->sprH[i]); }
   s->a.seed = seed;
-  {
-    UInt32 pf = 0;
-    if (WinScreenGetAttribute(winScreenPixelFormat, &pf) != 0) pf = 0;
-    /* pixelFormat565 (1) is big-endian; pixelFormat565LE (2) and the default E2
-       framebuffer are little-endian. */
-    s->a.pixBE = (pf == 1);
-  }
+  /* pixBE and rowPix were set by calibrate_pixels() / the Swap colors pref.
+     Do not re-query WinScreenGetAttribute here: that reads the LCD format,
+     which on the E2 can disagree with the offscreen BmpCreate bitmap ARM writes. */
   log_stage("ARM setup");
   call(s, CMD_SETUP);
   progress(s, 0, "Generating world...");
@@ -258,7 +436,14 @@ static void start_world(App *s, UInt32 seed, Boolean tryLoad) {
     EvtResetAutoOffTimer();
   }
   progress(s, 100, "Done");
-  if (tryLoad) { log_stage("Loading saved world"); progress(s, 99, "Loading saved world..."); load_world(s); }
+  if (tryLoad) {
+    log_stage("Loading saved world");
+    progress(s, 99, "Loading saved world...");
+    if (!load_world(s)) {
+      FrmAlert(AlertBadSave);
+      delete_save();
+    }
+  }
 }
 
 /* ---- input ---- */
@@ -371,6 +556,8 @@ static Boolean init(App *s) {
   if (!s->bits || ((UInt32)s->bits & 1)) { FrmAlert(AlertNeedHiRes); return false; }
   s->bmp3 = BmpCreateBitmapV3(s->bmp, kDensityDouble, s->bits, 0);
   if (!s->bmp3) { alert_nomem(64); return false; }
+  log_stage("Calibrating display");
+  calibrate_pixels(s);
   s->sndVol = (UInt16)PrefGetPreference(prefGameSoundVolume);
   if (s->sndVol > sndMaxAmp) s->sndVol = sndMaxAmp;
   s->sndVol = (UInt16)(s->sndVol * 100 / sndMaxAmp);
@@ -401,7 +588,7 @@ static Boolean form_handler(EventType *e) { (void)e; return false; }
 static void run(App *s) {
   EventType e; UInt32 last = TimGetTicks(), tps = SysTicksPerSecond(), saveT = 0;
   Int16 penX = 0, penY = 0, latchX = 0, latchY = 0; Boolean penDown = false, latch = false;
-  log_stage("Playing");
+  log_stage("Starting play");
   while (!s->quit) {
     UInt32 now, dt;
     /* drain events without blocking */
@@ -441,14 +628,27 @@ static void run(App *s) {
     present(s);
     play_sounds(s);
     EvtResetAutoOffTimer();
+    if (s->a.frames == 8) log_stage("Playing");
     saveT += dt;
+    if (s->a.req & REQ_PIXSWAP) {
+      /* ARM already flipped g->pixfmtBE; keep the 68K copy in sync so the
+         next present (and this immediate redraw) uses the new order. */
+      s->a.pixBE = s->a.pixBE ? 0 : 1;
+      pref_set((UInt8)s->a.pixBE);
+      present(s);
+    }
     if (s->a.req & REQ_NEWWORLD) { delete_save(); start_world(s, 0, false); saveT = 0; }
-    if (s->a.req & REQ_SAVE) { save_world(s); saveT = 0; }
+    /* Do not write a save until a handful of play frames have succeeded, so a
+       Fatal Exception on the first frame of a bad 1.0.1 save cannot replace
+       (or create) a broken autosave mid-crash. Menu save is also gated. */
+    if ((s->a.req & REQ_SAVE) && s->a.frames >= 8) { save_world(s); saveT = 0; }
     if (s->a.req & REQ_QUIT) { s->quit = true; }
-    if (saveT > 300000UL) { save_world(s); saveT = 0; } /* autosave every 5 minutes */
+    if (saveT > 300000UL && s->a.frames >= 20) { save_world(s); saveT = 0; }
   }
-  log_stage("Saving");
-  save_world(s);
+  if (s->a.frames >= 20) {
+    log_stage("Saving");
+    save_world(s);
+  }
 }
 
 UInt32 PilotMain(UInt16 cmd, MemPtr cmdPBP, UInt16 launchFlags) {
@@ -475,9 +675,10 @@ UInt32 PilotMain(UInt16 cmd, MemPtr cmdPBP, UInt16 launchFlags) {
     }
     if (init(s)) {
       UInt32 seed;
-      show_last_stage();
+      int forceNew = decide_load();
       FrmGotoForm(FormMain);
       { EventType e; do { EvtGetEvent(&e, 10); if (e.eType == frmLoadEvent) { FormType *f = FrmInitForm(e.data.frmLoad.formID); FrmSetActiveForm(f); FrmSetEventHandler(f, form_handler); } else if (!SysHandleEvent(&e)) FrmDispatchEvent(&e); } while (e.eType != frmOpenEvent && e.eType != nilEvent); }
+      if (forceNew) delete_save();
       seed = save_seed();
       start_world(s, seed, seed != 0);
       run(s);

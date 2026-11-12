@@ -57,6 +57,7 @@ unsigned long entry(const void *emulStateP, void *userData68KP, void *call68KFun
   } else if (cmd == CMD_LOAD) {
     SETA(ret, vc_load(g, A(len)));
   } else if (cmd == CMD_PRESENT) {
+    g->pixfmtBE = (int)A(pixBE);
     vc_present(g, (u16 *)(unsigned long)A(dst), (int)A(rowPix));
   } else if (cmd == CMD_PROGRESS) {
     vc_progress(g, (int)A(pct), (const char *)(unsigned long)A(msg));

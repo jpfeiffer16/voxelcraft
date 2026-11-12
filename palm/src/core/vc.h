@@ -126,6 +126,7 @@ enum { ST_PLAY = 0, ST_INV, ST_MENU, ST_DEAD, ST_SLEEP };
 #define REQ_SAVE 1
 #define REQ_QUIT 2
 #define REQ_NEWWORLD 4
+#define REQ_PIXSWAP 8
 
 typedef struct VC {
   u32 magic, size;
@@ -193,6 +194,8 @@ typedef struct VC {
   /* save */
   u8 io[262144];
   u32 ioLen;
+  /* lighting/brightness table for the current frame (kept off the ARM stack) */
+  u8 btab[256][4];
 } VC;
 
 /* entry points */

@@ -331,7 +331,7 @@ static void raycast(VC *g, fx dx, fx dy, fx dz, fx maxD, Ray *r) {
     else { z += sz; t = tmz; tmz += tdz; nx = 0; ny = 0; nz = -sz; }
   }
 }
-static int held(VC *g) { return g->hotbar[g->sel]; }
+static int held(VC *g) { int s = g->sel; if ((unsigned)s > 8) s = 0; return g->hotbar[s] & 255; }
 static void break_block(VC *g, int x, int y, int z) {
   int id = getb(g, x, y, z), above;
   if (!id || id == BEDROCK || (unsigned)x >= WX || (unsigned)z >= WZ) return;

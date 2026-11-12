@@ -4,3 +4,6 @@
 #define AlertNoMem 1102
 #define AlertNeedOS 1103
 #define AlertLastStage 1104
+#define AlertCrashLoad 1105
+#define AlertSkipSave 1106
+#define AlertBadSave 1107

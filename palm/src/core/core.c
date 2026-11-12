@@ -107,9 +107,9 @@ static void draw_hud(VC *g) {
   /* held item */
   if (g->state == ST_PLAY && !g->riding) {
     int sw = g->swing > 0 ? g->swing : 0, bob = g->bobA ? (int)(SIN(g, g->bob) * 3 >> 16) : 0;
-    const BDef *d = &g->bd[g->hotbar[g->sel]];
+    int hid = g->hotbar[g->sel] & 255; const BDef *d = &g->bd[hid];
     if (d->kind == K_SWORD || (d->flags & F_ITEM) || d->render == R_CROSS || d->render == R_TORCH) draw_tile(g, 236 - sw, 212 + sw + bob, d->side, 64, 26);
-    else draw_iso(g, 240 - sw, 222 + sw + bob, 64, g->hotbar[g->sel]);
+    else draw_iso(g, 240 - sw, 222 + sw + bob, 64, hid);
   }
   /* hurt flash */
   if (g->hurtFlash > 0) { fill(g, 0, 0, SW, 3, RGB(220, 20, 20)); fill(g, 0, HOTY - 3, SW, 3, RGB(220, 20, 20)); fill(g, 0, 0, 3, HOTY, RGB(220, 20, 20)); fill(g, SW - 3, 0, 3, HOTY, RGB(220, 20, 20)); }
@@ -132,17 +132,18 @@ static void draw_inventory(VC *g) {
   }
   { char nb[32]; draw_text_c(g, 160, HOTY - 18, bname_r(g->invList[g->invSel], nb), RGB(255, 240, 160), 1); }
 }
-static const char MENU_BLOB[] = "Resume|Save world|Sound|Hostile mobs|New world|Save & Quit|";
+static const char MENU_BLOB[] = "Resume|Save world|Sound|Hostile mobs|Swap colors|New world|Save & Quit|";
 static char *menu_item(int i, char *out) { const char *p = MENU_BLOB; while (i--) { while (*p != '|') p++; p++; } while (*p != '|') *out++ = *p++; *out = 0; return out; }
-#define NMENU 6
+#define NMENU 7
 static void draw_menu(VC *g) {
   int i;
   shade_rect(g, 0, 0, SW, HOTY); shade_rect(g, 0, 0, SW, HOTY);
-  draw_text_c(g, 160, 18, "VoxelCraft", RGB(255, 255, 255), 1);
+  draw_text_c(g, 160, 4, "VoxelCraft", RGB(255, 255, 255), 1);
   for (i = 0; i < NMENU; i++) {
-    int y = 46 + i * 38; char buf[40], *p = menu_item(i, buf);
+    int y = 22 + i * 37; char buf[40], *p = menu_item(i, buf);
     if (i == 2) scpy(p, g->soundOn ? ": On" : ": Off");
     if (i == 3) scpy(p, g->hostileOn ? ": On" : ": Off");
+    if (i == 4) scpy(p, g->pixfmtBE ? ": On" : ": Off");
     fill(g, 60, y, 200, 32, i == g->menuSel ? RGB(110, 110, 120) : RGB(70, 70, 76));
     frame_rect(g, 60, y, 200, 32, i == g->menuSel ? RGB(255, 255, 255) : RGB(20, 20, 20));
     draw_text_c(g, 160, y + 8, buf, RGB(255, 255, 255), 1);
@@ -153,8 +154,9 @@ static void menu_pick(VC *g, int i) {
   else if (i == 1) { g->req |= REQ_SAVE; toast(g, "World saved"); g->state = ST_PLAY; }
   else if (i == 2) { g->soundOn = !g->soundOn; snd(g, 600, 60, 60); }
   else if (i == 3) { g->hostileOn = !g->hostileOn; if (!g->hostileOn) { int k; for (k = 0; k < MAXMOBS; k++) if (g->mobs[k].alive && MT[g->mobs[k].type].hostile) g->mobs[k].alive = 0; } }
-  else if (i == 4) g->req |= REQ_NEWWORLD;
-  else if (i == 5) g->req |= REQ_SAVE | REQ_QUIT;
+  else if (i == 4) { g->pixfmtBE = !g->pixfmtBE; g->req |= REQ_PIXSWAP; toast(g, g->pixfmtBE ? "Colors swapped" : "Colors default"); }
+  else if (i == 5) g->req |= REQ_NEWWORLD;
+  else if (i == 6) g->req |= REQ_SAVE | REQ_QUIT;
 }
 
 /* ---------------- frame ---------------- */
@@ -163,8 +165,16 @@ void vc_frame(VC *g, const Input *in) {
   fx dt = (fx)((dtMs << 16) / 1000); int dtcs = (int)(dtMs + 5) / 10, i;
   u32 keys = in->keys, pressed = keys & ~g->prevKeys;
   int penDown = in->penDown, penX = in->penX, penY = in->penY, penPressed = penDown && !g->penWasDown, penReleased = !penDown && g->penWasDown;
-  BTab bt;
+  BTab *bt = (BTab *)g->btab;
   if (dtcs < 1) dtcs = 1;
+  /* Clamp anything a bad save or a wild stylus event could have left behind
+     before look math, item drawing, or the raycaster run. */
+  g->yaw &= 1023;
+  if (g->pitch > 240) g->pitch = 240;
+  if (g->pitch < -240) g->pitch = -240;
+  if ((unsigned)g->sel > 8) g->sel = 0;
+  if (penX < -64) penX = -64; if (penX > 384) penX = 384;
+  if (penY < -64) penY = -64; if (penY > 384) penY = 384;
   g->nsnd = 0; g->frames++;
   g->timeMs += dtMs;
   if (g->toastT > 0) g->toastT -= (int)dtMs;
@@ -188,7 +198,9 @@ void vc_frame(VC *g, const Input *in) {
       }
     } else if (penDown && g->penOnView) {
       int ddx = penX - g->penLastX, ddy = penY - g->penLastY, tx = penX - g->penStartX, ty = penY - g->penStartY;
-      if (!g->penMoved && (tx * tx + ty * ty) > 64) g->penMoved = 1;
+      if (ddx < -64) ddx = -64; if (ddx > 64) ddx = 64;
+      if (ddy < -64) ddy = -64; if (ddy > 64) ddy = 64;
+      if (!g->penMoved && ((long)tx * tx + (long)ty * ty) > 64) g->penMoved = 1;
       if (g->penMoved) {
         g->yaw = (g->yaw - ddx * 8 / 5) & 1023; g->pitch -= ddy * 8 / 5;
         if (g->pitch > 240) g->pitch = 240; if (g->pitch < -240) g->pitch = -240;
@@ -225,8 +237,8 @@ void vc_frame(VC *g, const Input *in) {
     if (pressed & (K_CENTER | K_PLACE)) menu_pick(g, g->menuSel);
     if (pressed & (K_INV | K_MENU)) g->state = ST_PLAY;
     if (penPressed) {
-      int k = (penY - 46) / 38;
-      if (penX >= 60 && penX < 260 && penY >= 46 && k < NMENU && (penY - 46) % 38 < 32) { g->menuSel = k; menu_pick(g, k); }
+      int k = (penY - 22) / 37;
+      if (penX >= 60 && penX < 260 && penY >= 22 && k < NMENU && (penY - 22) % 37 < 32) { g->menuSel = k; menu_pick(g, k); }
       else if (penY < HOTY) g->state = ST_PLAY;
     }
     g->penOnView = 0;
@@ -261,10 +273,10 @@ void vc_frame(VC *g, const Input *in) {
     Ray r; raycast(g, g->cfx, g->cfy, g->cfz, FX(5), &r);
     g->tgtValid = r.hit && g->state == ST_PLAY; g->tgtX = r.x; g->tgtY = r.y; g->tgtZ = r.z; g->tgtMob = r.mob;
   }
-  make_btab(g, &bt);
-  render_world(g, &bt);
+  make_btab(g, bt);
+  render_world(g, bt);
   render_sky(g);
-  render_mobs(g, &bt);
+  render_mobs(g, bt);
   if (g->state == ST_SLEEP) { int k, a = g->sleepT * 28 / 2500; if (a > 28) a = 28; for (k = 0; k < VW * VH; k++) g->view[k] = blend(g->view[k], 0, a); }
   if (g->state == ST_DEAD) { int k; for (k = 0; k < VW * VH; k++) g->view[k] = blend(g->view[k], RGB(140, 0, 0), 14); }
   blit_view(g);
@@ -307,8 +319,53 @@ HOT void vc_present(VC *g, u16 *dst, int rowPix) {
 static u8 *put32(u8 *p, u32 v) { p[0] = (u8)v; p[1] = (u8)(v >> 8); p[2] = (u8)(v >> 16); p[3] = (u8)(v >> 24); return p + 4; }
 static u32 get32(const u8 *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((u32)p[3] << 24); }
 static u8 *putv(u8 *p, u32 v) { while (v >= 128) { *p++ = (u8)(v | 128); v >>= 7; } *p++ = (u8)v; return p; }
-static const u8 *getv(const u8 *p, u32 *v) { u32 r = 0; int s = 0; while (*p & 128) { r |= (u32)(*p++ & 127) << s; s += 7; } r |= (u32)*p++ << s; *v = r; return p; }
+static const u8 *getv(const u8 *p, const u8 *end, u32 *v, int *ok) {
+  u32 r = 0; int s = 0, n = 0;
+  *v = 0;
+  if (!p || p >= end) { *ok = 0; return p ? p : end; }
+  while (p < end && (*p & 128) && n < 5) { r |= (u32)(*p++ & 127) << s; s += 7; n++; }
+  if (p >= end || n >= 5) { *ok = 0; return p; }
+  r |= (u32)*p++ << s; *v = r; return p;
+}
 #define SAVE_MAGIC 0x31535856u /* "VXS1" */
+static int fx_in_world(fx v, int lo, int hi) {
+  int b = v >> 16;
+  return b >= lo && b < hi;
+}
+static void vc_sanitize(VC *g) {
+  int i;
+  g->yaw &= 1023;
+  if (g->pitch > 240) g->pitch = 240;
+  if (g->pitch < -240) g->pitch = -240;
+  if ((unsigned)g->sel > 8) g->sel = 0;
+  for (i = 0; i < 9; i++) g->hotbar[i] &= 255;
+  if (g->maxHealth < 1 || g->maxHealth > 40) g->maxHealth = 20;
+  if (g->health > g->maxHealth) g->health = g->maxHealth;
+  if (g->health < 0) g->health = 0;
+  if (!fx_in_world(g->px, 1, WX - 1)) g->px = g->spawnX;
+  if (!fx_in_world(g->pz, 1, WZ - 1)) g->pz = g->spawnZ;
+  if (!fx_in_world(g->py, 0, WY + 2)) g->py = g->spawnY;
+  if (!fx_in_world(g->px, 1, WX - 1) || !fx_in_world(g->pz, 1, WZ - 1)) {
+    g->px = FX(WX / 2) + FX(0.5); g->pz = FX(WZ / 2) + FX(0.5);
+  }
+  if (!fx_in_world(g->py, 0, WY + 2)) g->py = FX(40);
+  if (!fx_in_world(g->spawnX, 1, WX - 1) || !fx_in_world(g->spawnZ, 1, WZ - 1)) {
+    g->spawnX = FX(WX / 2) + FX(0.5); g->spawnZ = FX(WZ / 2) + FX(0.5);
+  }
+  if (!fx_in_world(g->spawnY, 0, WY + 2)) g->spawnY = FX(40);
+  if (g->invN < 0 || g->invN > 128) g->invN = 0;
+  if (g->invSel < 0 || (g->invN && g->invSel >= g->invN)) g->invSel = 0;
+  if (g->state < 0 || g->state > ST_SLEEP) g->state = ST_PLAY;
+  for (i = 0; i < MAXMOBS; i++) {
+    Mob *m = &g->mobs[i];
+    if (!m->alive) continue;
+    if (m->type >= M_TYPES) { m->alive = 0; continue; }
+    m->yaw = (s16)(m->yaw & 1023);
+    if (m->hp <= 0 || m->hp > 200) m->hp = MT[m->type].hp;
+    if (!fx_in_world(m->x, -2, WX + 2) || !fx_in_world(m->z, -2, WZ + 2) || !fx_in_world(m->y, -4, WY + 8)) m->alive = 0;
+  }
+  g->riding = 0; /* a stale riding index after a load is not worth keeping */
+}
 u32 vc_save(VC *g) {
   u8 *p = g->io, *end = g->io + sizeof(g->io) - 16; int i; u32 pos = 0;
   p = put32(p, SAVE_MAGIC); p = put32(p, g->seed); p = put32(p, g->worldTime);
@@ -339,29 +396,58 @@ u32 vc_save(VC *g) {
 u32 vc_save_seed(const u8 *io) { return get32(io) == SAVE_MAGIC ? get32(io + 4) : 0; }
 /* call after the world (same seed) has been fully generated */
 int vc_load(VC *g, u32 len) {
-  const u8 *p = g->io, *end = g->io + len; int i, n; u32 pos = 0;
-  if (len < 100 || get32(p) != SAVE_MAGIC || get32(p + 4) != g->seed) return 0;
-  p += 8; g->worldTime = get32(p); p += 4;
-  g->px = (fx)get32(p); p += 4; g->py = (fx)get32(p); p += 4; g->pz = (fx)get32(p); p += 4; g->yaw = (s32)get32(p) & 1023; p += 4; g->pitch = (s32)get32(p); p += 4;
-  g->health = (s32)get32(p); p += 4; g->spawnX = (fx)get32(p); p += 4; g->spawnY = (fx)get32(p); p += 4; g->spawnZ = (fx)get32(p); p += 4;
-  for (i = 0; i < 9; i++) { g->hotbar[i] = (int)get32(p) & 255; p += 4; }
-  { u32 f = get32(p); p += 4; g->sel = (int)(f & 15) % 9; g->hostileOn = (f >> 8) & 1; g->soundOn = (f >> 9) & 1; g->eggNote = (f >> 10) & 1; }
-  for (i = 0; i < MAXMOBS; i++) g->mobs[i].alive = 0;
+  const u8 *p = g->io, *end; int i, n, ok = 1; u32 pos = 0;
+  fx px, py, pz, spx, spy, spz; s32 yaw, pitch, health; u32 worldTime, f;
+  int hot[9];
+  if (len < 100 || len > sizeof(g->io) || get32(p) != SAVE_MAGIC || get32(p + 4) != g->seed) return 0;
+  end = g->io + len;
+  p += 8;
+  if (p + 4 * 12 + 4 * 9 + 8 > end) return 0; /* time, pos, angles, health, spawn, hotbar, flags, mob count */
+  worldTime = get32(p); p += 4;
+  px = (fx)get32(p); p += 4; py = (fx)get32(p); p += 4; pz = (fx)get32(p); p += 4;
+  yaw = (s32)get32(p) & 1023; p += 4; pitch = (s32)get32(p); p += 4;
+  health = (s32)get32(p); p += 4;
+  spx = (fx)get32(p); p += 4; spy = (fx)get32(p); p += 4; spz = (fx)get32(p); p += 4;
+  for (i = 0; i < 9; i++) { hot[i] = (int)get32(p) & 255; p += 4; }
+  f = get32(p); p += 4;
   n = (int)get32(p); p += 4;
+  /* Reject a 1.0.1 save whose header is clearly garbage rather than trying to play it. */
+  if (n < 0 || n > MAXMOBS * 4) return 0;
+  if ((px >> 16) < -8 || (px >> 16) >= WX + 8) return 0;
+  if ((pz >> 16) < -8 || (pz >> 16) >= WZ + 8) return 0;
+  if ((py >> 16) < -16 || (py >> 16) >= WY + 16) return 0;
+  g->worldTime = worldTime;
+  g->px = px; g->py = py; g->pz = pz; g->yaw = yaw; g->pitch = pitch;
+  g->health = health; g->spawnX = spx; g->spawnY = spy; g->spawnZ = spz;
+  for (i = 0; i < 9; i++) g->hotbar[i] = hot[i];
+  g->sel = (int)(f & 15) % 9; g->hostileOn = (f >> 8) & 1; g->soundOn = (f >> 9) & 1; g->eggNote = (f >> 10) & 1;
+  for (i = 0; i < MAXMOBS; i++) g->mobs[i].alive = 0;
+  g->riding = 0;
   for (i = 0; i < n && i < MAXMOBS && p + 18 <= end; i++) {
     int type = *p++, fl = *p++; Mob *m; fx x = (fx)get32(p), y = (fx)get32(p + 4), z = (fx)get32(p + 8); u32 yh = get32(p + 12); p += 16;
-    if (type >= M_TYPES) continue;
+    if ((unsigned)type >= M_TYPES) continue;
+    if ((x >> 16) < -2 || (x >> 16) >= WX + 2 || (z >> 16) < -2 || (z >> 16) >= WZ + 2) continue;
+    if ((y >> 16) < -4 || (y >> 16) >= WY + 8) continue;
     m = spawn_mob(g, type, x, y, z); if (!m) continue;
-    m->tamed = (u8)(fl & 1); m->wild = (u8)((fl >> 1) & 1); m->sitting = (u8)((fl >> 2) & 1); m->yaw = (s16)(yh & 1023); m->hp = (s16)(yh >> 16);
+    m->tamed = (u8)(fl & 1); m->wild = (u8)((fl >> 1) & 1); m->sitting = (u8)((fl >> 2) & 1);
+    m->yaw = (s16)(yh & 1023); m->hp = (s16)(yh >> 16);
+    if (m->hp <= 0 || m->hp > 200) m->hp = MT[type].hp;
   }
-  while (p < end) {
+  while (ok && p < end) {
     u32 skip, run;
-    p = getv(p, &skip); p = getv(p, &run);
+    p = getv(p, end, &skip, &ok); if (!ok) break;
+    p = getv(p, end, &run, &ok); if (!ok) break;
     if (!skip && !run) break;
+    if (skip > WSIZE || run > WSIZE) { ok = 0; break; }
     pos += skip;
+    if (pos > WSIZE) { ok = 0; break; }
     while (run-- && pos < WSIZE && p < end) { g->blocks[pos] = *p++; g->edited[pos >> 3] |= (u8)(1 << (pos & 7)); pos++; }
   }
-  if (g->health <= 0) g->health = g->maxHealth;
+  if (!ok && p >= end) {
+    /* truncated tail: keep the prefix of edits that was valid */
+  }
+  vc_sanitize(g);
+  if (g->health <= 0) { g->health = g->maxHealth; g->state = ST_PLAY; }
   light_region(g, WX / 2, WZ / 2, WX);
   g->hotDirty = 1; g->state = ST_PLAY; g->toastT = 0;
   camera_update(g);
